@@ -5,9 +5,9 @@ import pytest
 pytest.importorskip("faker")
 
 from note_deid.data import Injector, Profile, demo_docs, inject_all, residual_spans, strip_placeholders
-from note_deid.data.synphi import build
 from note_deid.data.phi_injection.generators import Generators
 from note_deid.data.phi_injection.templates import HEADERS, SENTENCES, render
+from note_deid.data.synphi import build
 from note_deid.eval import evaluate
 from note_deid.labels import I2B2_2014_SUBTYPES
 from note_deid.schema import Doc, read_jsonl
