@@ -11,11 +11,11 @@ Last checked: 2026-09-14. See `literature.md` §9 for citations and `framework-d
 | CEGS N-GRID 2016 | real, gated | 1,000 psychiatric intake records | i2b2-style | same DUA | as above | `note_deid.data.ngrid_2016` (stub) |
 | PhysioNet `deid` gold standard v1.1 | real, gated | 2,434 MIMIC-II nursing notes (surrogate PHI) | names, dates, locations, MRN, phone, company | PhysioNet credentialed access (CITI + identity check); ODC-By 1.0 for files | available to credentialed users | `note_deid.data.physionet_deid` (stub) |
 | MIMIC-IV-Note v2.2 | real, gated, already de-identified | ~330k notes | none (`___` placeholders) | PhysioNet credentialed | available to credentialed users | re-injection source (later) |
-| **MTSamples** | real-style transcribed samples, no real PHI | ~5k reports, ~40 specialties | none | public website; Kaggle mirror "Medical Transcriptions" (check terms before redistribution) | available | `note_deid.data.mtsamples` |
+| **MTSamples** | real-style transcribed samples, names/dates changed | 5,043 reports, 40 specialties | none | public website; educational use with attribution to mtsamples.com; Kaggle mirror "Medical Transcriptions" | available | `note_deid.data.mtsamples` |
 | **Asclepius synthetic clinical notes** | synthetic notes from PMC-Patients | ~158k | none | HF `starmpcc/Asclepius-Synthetic-Clinical-Notes`, CC-BY-NC-SA 4.0 | available | `note_deid.data.asclepius` |
-| Synthetic4Health | synthetic clinical letters | TBD | TBD | TBD — verify | to verify | optional |
+| Synthetic4Health | generation system over MIMIC-IV-derived letters | 204 letters | clinical entities | code public; source data credentialed | not an open note corpus | not used |
 | ASQ-PHI | synthetic single-line clinical queries | 1,051 queries / 2,973 PHI elements / 13 types | JSON per element | Mendeley Data, MIT | available | `note_deid.data.asq_phi` (auxiliary) |
-| SHIELD | synthetic-identifier notes, human-adjudicated | 1,381 notes / 10,229 spans / 9 categories | 9 | "publicly released" per paper; location TBC | to locate | optional external test |
+| SHIELD | surrogate-replaced notes, LLM pre-annotation + human adjudication (Stanford Medicine) | 1,381 notes / 10,229 spans | 9 coarse (AGE, DATE, DOCTOR, HOSPITAL, ID, LOCATION, PATIENT, PHONE, WEB) | github.com/susom/shield_dataset | available | `note_deid.data.shield` (P2; external test, RQ6) |
 | `auren-research/pii-shield` | real docs, silver PII labels, 5 domains, 6 languages | 531k English docs | PII (non-clinical) | HF; license TBC | available | optional pre-training only |
 | NVIDIA Nemotron-PII | synthetic PII documents | 50k/5k/45k | ~55 types | HF | available | label-map reference / optional pre-training |
 | AI4Privacy pii-masking-300k / open-pii-masking-500k | synthetic multi-domain PII | 300k–500k | ~50 types | HF, open | available | optional |
