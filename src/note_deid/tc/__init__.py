@@ -1,10 +1,24 @@
-"""Token-classification detector (phase P1).
-
-Planned modules:
-- ``encode``      Doc spans -> token labels (BIO/BIOES) with offset mapping; window/stride chunking for 512-token
-                  encoders (OPF needs no chunking: 128k context)
-- ``decode``      token probabilities -> spans with scores (min/mean token probability)
-- ``train``       HF Trainer path (DeBERTa-v3, OpenMed-PII, OPF with extended head for H13) and the
-                  ``opf train`` CLI path via ``schema.to_opf_record``; configs under configs/train/
-- ``detector``    ``TCDetector.detect(docs) -> list[list[Span]]``
+"""Token-classification backend: span/tag encoding with chunking, tag decoding with span scores, a Transformers
+detector (``TCDetector``, imported lazily because it needs torch) and a Trainer-based fine-tuning script
+(``python -m note_deid.tc.train``).
 """
+
+from note_deid.tc.decode import decode_tags
+from note_deid.tc.encode import (
+    IGNORE_INDEX,
+    chunk_windows,
+    merge_window_predictions,
+    regex_token_offsets,
+    spans_to_token_labels,
+    tags_to_ids,
+)
+
+__all__ = [
+    "IGNORE_INDEX",
+    "chunk_windows",
+    "decode_tags",
+    "merge_window_predictions",
+    "regex_token_offsets",
+    "spans_to_token_labels",
+    "tags_to_ids",
+]
