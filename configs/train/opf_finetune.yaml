@@ -1,0 +1,15 @@
+# Placeholder hyperparameters for fine-tuning the OpenAI Privacy Filter (phase P1/P3). Values to be tuned.
+base_model: openai/privacy-filter
+label_space: opf8            # opf8 (native, via I2B2_TO_OPF) | i2b2_28 (extended head, H13 option a)
+train_jsonl: data/synphi/v0.1/train.opf.jsonl
+dev_jsonl: data/synphi/v0.1/dev.opf.jsonl
+output_dir: models/opf-synphi-v0.1
+learning_rate: 2.0e-5
+epochs: 3
+per_device_batch_size: 4
+gradient_accumulation: 4
+max_length: 8192             # OPF supports 128k; cap for memory
+precision: bf16              # a100: bf16; mac/cpu: fp32
+seeds: [13, 42, 2024]
+# CLI path:   opf train <train_jsonl> --output-dir <output_dir> [--device cpu|gpu]
+# HF path:    python -m note_deid.tc.train --config configs/train/opf_finetune.yaml   (phase P1)

@@ -1,0 +1,35 @@
+# synphi frequency profile "i2b2like": relative weights per subtype approximating the i2b2-2014 training
+# distribution (qualitative ordering from Stubbs & Uzuner 2015; replace with exact counts when the DUA copy is
+# available). Weights are mentions per 1,000 tokens, scaled by `target_density` at build time.
+version: 0.1
+target_density: 1.0
+institutional_group: false          # set true to add the INSTITUTIONAL extension labels
+weights:
+  DATE: 40
+  DOCTOR: 15
+  HOSPITAL: 8
+  PATIENT: 7
+  AGE: 6
+  MEDICALRECORD: 3
+  CITY: 2
+  STATE: 1.5
+  PHONE: 1.5
+  IDNUM: 1.5
+  STREET: 1
+  ZIP: 1
+  PROFESSION: 1
+  ORGANIZATION: 0.7
+  USERNAME: 0.5
+  COUNTRY: 0.3
+  LOCATION-OTHER: 0.05
+  FAX: 0.05
+  EMAIL: 0.03
+  URL: 0.02
+  DEVICE: 0.03
+  BIOID: 0.01
+  HEALTHPLAN: 0.01
+  IPADDR: 0.01
+  SSN: 0.01
+  VEHICLE: 0.01
+  LICENSE: 0.02
+  ACCOUNT: 0.02
