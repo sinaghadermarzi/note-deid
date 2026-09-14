@@ -1,10 +1,10 @@
-"""Token tags -> character spans with a span score (min or mean token probability)."""
+"""Token tags -> character spans with a span score (min or mean token probability); forced label probabilities."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
-from note_deid.labels import strip_bio_prefix
+from note_deid.labels import map_label, strip_bio_prefix
 from note_deid.schema import Span
 from note_deid.tc.encode import OUTSIDE, Offsets
 
@@ -53,3 +53,41 @@ def decode_tags(
             close()
     close()
     return spans
+
+
+def span_label_prob(
+    dist: Sequence[Sequence[float]],
+    token_offsets: Offsets,
+    id2label: Mapping[int, str],
+    start: int,
+    end: int,
+    label: str,
+    label_map: Mapping[str, str | None] | None = None,
+    reduce: str = "mean",
+) -> float:
+    """Forced-decoding probability of ``label`` over ``[start, end)`` (H3 rule (d), framework-designs.md Appendix C).
+
+    For every token overlapping the extent, sum the probability mass on all tags of that label (any BIO/BIOES prefix;
+    model labels mapped to the canonical taxonomy through ``label_map`` when given), then reduce with the mean
+    (default) or the minimum over the tokens. Returns 0.0 when the model has no tag for the label or no token
+    overlaps the extent. ``dist[i]`` is the class distribution of token ``i``; special tokens (empty offsets) are
+    skipped.
+    """
+    targets: set[int] = set()
+    for i, tag in id2label.items():
+        if tag == OUTSIDE:
+            continue
+        base = strip_bio_prefix(tag)
+        canonical = map_label(base, label_map) if label_map is not None else base
+        if canonical == label:
+            targets.add(int(i))
+    if not targets:
+        return 0.0
+    masses: list[float] = []
+    for row, (ts, te) in zip(dist, token_offsets, strict=True):
+        if ts == te or te <= start or ts >= end:
+            continue
+        masses.append(sum(row[i] for i in targets if i < len(row)))
+    if not masses:
+        return 0.0
+    return min(masses) if reduce == "min" else sum(masses) / len(masses)

@@ -85,6 +85,21 @@ def test_hipaa_view_applies_age_rule_and_drops_non_hipaa_labels():
     assert evaluate([young], {"d2": list(young.spans)}, hipaa_only=True).micro.support == 0
 
 
+def test_hipaa_view_excludes_year_only_dates():
+    text = "Dx in 2019; surgery March 2019; seen 03/04/2019 and in 1998."
+    spans = [
+        Span(6, 10, "DATE"),  # "2019" -> bare year, not a Safe Harbor date element
+        Span(20, 30, "DATE"),  # "March 2019"
+        Span(37, 47, "DATE"),  # "03/04/2019"
+        Span(55, 59, "DATE"),  # "1998" -> bare year
+    ]
+    doc = Doc("d3", text, spans).fill_span_text().validate()
+    assert [s.text for s in doc.spans] == ["2019", "March 2019", "03/04/2019", "1998"]
+    rep = evaluate([doc], {"d3": list(doc.spans)}, hipaa_only=True)
+    assert rep.per_label["DATE"].support == 2
+    assert evaluate([doc], {"d3": list(doc.spans)}).per_label["DATE"].support == 4  # full i2b2 view keeps years
+
+
 def test_missing_predictions_count_as_misses_and_empty_docs_do_not_leak():
     g = gold_doc()
     empty = Doc("d0", "nothing here", [])

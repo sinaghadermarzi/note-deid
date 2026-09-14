@@ -50,3 +50,34 @@ def test_runner_end_to_end_with_simulated_detectors(tmp_path):
     preds = list(read_jsonl(out / "predictions" / "union.jsonl"))
     assert len(preds) == metrics["n_docs"]
     assert json.loads((out / "cost.json").read_text()) == {}
+
+
+def test_confidence_gate_uses_the_detectors_verifier_and_forced_probability(tmp_path):
+    bench = _bench(tmp_path)
+    cfg = load_config("configs/experiments/smoke_simulated.yaml")
+    cfg["benchmark"]["path"] = str(bench)
+    cfg["eval"]["bootstrap"] = {"n": 20, "seed": 0}
+    # theta_hi above the simulated TC score (0.95): every TC-only span goes to the verifier; LLM false positives on
+    # frequent labels get a low forced probability and go to the verifier too
+    cfg["fusion"] = [{"name": "confidence_gated", "theta_hi": 0.99, "theta_lo": 0.3, "tau": 10}]
+    out = run(cfg, out_dir=tmp_path / "with_hooks")
+    stats = json.loads((out / "metrics.json").read_text())["fusion"]["confidence_gated"]
+    assert stats["verifier_calls"] > 0
+    assert not any(rule.endswith(":no-verifier") for rule in stats["rules"])
+    assert "tc-only:low:verified" in stats["rules"]
+    rows = [
+        json.loads(line) for line in (out / "predictions" / "confidence_gated.decisions.jsonl").read_text().splitlines()
+    ]
+    assert rows and {"doc_id", "start", "end", "label", "rule", "accepted"} <= set(rows[0])
+    assert sum(1 for r in rows if r["rule"].endswith(":verified")) == stats["verifier_calls"]
+    assert "verifier calls" in (out / "summary.md").read_text()
+    # the oracle verifier keeps every gold-overlapping candidate, so the gate cannot lose recall to the TC alone
+    systems = json.loads((out / "metrics.json").read_text())["systems"]
+    gate = systems["confidence_gated"]["relaxed/subtype"]["micro"]
+    assert gate["recall"] >= systems["tc"]["relaxed/subtype"]["micro"]["recall"]
+
+    cfg["fusion"] = [{"name": "confidence_gated", "theta_hi": 0.99, "verify": False}]
+    out2 = run(cfg, out_dir=tmp_path / "without_verifier")
+    stats2 = json.loads((out2 / "metrics.json").read_text())["fusion"]["confidence_gated"]
+    assert stats2["verifier_calls"] == 0
+    assert any(rule.endswith(":no-verifier") for rule in stats2["rules"])

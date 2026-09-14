@@ -3,7 +3,7 @@ detector (``TCDetector``, imported lazily because it needs torch) and a Trainer-
 (``python -m note_deid.tc.train``).
 """
 
-from note_deid.tc.decode import decode_tags
+from note_deid.tc.decode import decode_tags, span_label_prob
 from note_deid.tc.encode import (
     IGNORE_INDEX,
     chunk_windows,
@@ -19,6 +19,7 @@ __all__ = [
     "decode_tags",
     "merge_window_predictions",
     "regex_token_offsets",
+    "span_label_prob",
     "spans_to_token_labels",
     "tags_to_ids",
 ]

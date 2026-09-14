@@ -2,6 +2,7 @@ import os
 
 import pytest
 
+from note_deid.labels import OPF_TO_I2B2_CATEGORY
 from note_deid.schema import Doc, Span
 from note_deid.tc import (
     IGNORE_INDEX,
@@ -9,6 +10,7 @@ from note_deid.tc import (
     decode_tags,
     merge_window_predictions,
     regex_token_offsets,
+    span_label_prob,
     spans_to_token_labels,
     tags_to_ids,
 )
@@ -45,6 +47,21 @@ def test_decode_is_tolerant_and_scores_spans():
     ]
     mean = decode_tags(tags, offs, probs, score="mean")
     assert mean[0].score == pytest.approx(0.75)
+
+
+def test_span_label_prob_sums_label_mass_over_the_extent():
+    id2label = dict(enumerate(["O", "B-DATE", "E-DATE", "S-private_person"]))
+    offs = [(0, 2), (3, 5), (6, 9), (9, 9)]
+    dist = [[0.1, 0.5, 0.3, 0.1], [0.2, 0.1, 0.6, 0.1], [0.9, 0.0, 0.0, 0.1], [1.0, 0.0, 0.0, 0.0]]
+    # tokens 0 and 1 overlap [0, 5): DATE mass 0.8 and 0.7 (any prefix); the special token is skipped
+    assert span_label_prob(dist, offs, id2label, 0, 5, "DATE") == pytest.approx(0.75)
+    assert span_label_prob(dist, offs, id2label, 0, 5, "DATE", reduce="min") == pytest.approx(0.7)
+    assert span_label_prob(dist, offs, id2label, 1, 4, "DATE") == pytest.approx(0.75)  # partial overlaps count
+    assert span_label_prob(dist, offs, id2label, 0, 5, "PATIENT") == 0.0  # no tag for the label
+    assert span_label_prob(dist, offs, id2label, 10, 12, "DATE") == 0.0  # nothing overlaps
+    # model labels are compared after the mapping (OPF private_person -> NAME category)
+    assert span_label_prob(dist, offs, id2label, 6, 9, "NAME", label_map=OPF_TO_I2B2_CATEGORY) == pytest.approx(0.1)
+    assert span_label_prob(dist, offs, id2label, 6, 9, "private_person") == pytest.approx(0.1)
 
 
 def test_tags_to_ids_ignores_special_tokens():
@@ -103,3 +120,6 @@ def test_train_and_detect_smoke(tmp_path):
     preds = det.detect(docs[:1])[0]
     assert any(s.label == "PATIENT" and s.text == "John Smith" for s in preds), preds
     assert len(det.token_max_probs(docs[0].text)) > 0
+    name = next(s for s in preds if s.text == "John Smith")
+    assert det.forced_prob(docs[0].text, name) > 0.5
+    assert det.forced_prob(docs[0].text, Span(name.start, name.end, "DATE")) < 0.5

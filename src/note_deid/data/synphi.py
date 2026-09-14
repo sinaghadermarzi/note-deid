@@ -2,6 +2,11 @@
 
     python -m note_deid.data.synphi build --profile configs/synphi/i2b2like.yaml --out data/synphi/v0.1 \
         [--demo] [--mtsamples path/to/mtsamples.csv] [--asclepius 500] [--limit N] [--seed 0] [--version 0.1]
+    python -m note_deid.data.synphi export-opf --bench data/synphi/v0.1 [--splits train dev test]
+
+``export-opf`` writes ``<split>.opf.jsonl`` next to the unified files for the upstream ``opf train`` / ``opf eval``
+CLI (labels mapped to OPF's eight; subtypes OPF cannot represent are dropped). ``note_deid.tc.train`` reads the
+unified files directly.
 """
 
 from __future__ import annotations
@@ -16,7 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from note_deid.data.phi_injection.inject import Injector, Profile
-from note_deid.schema import Doc, write_jsonl
+from note_deid.labels import I2B2_TO_OPF, INSTITUTIONAL_SUBTYPES
+from note_deid.schema import Doc, read_jsonl, to_opf_record, write_jsonl
 
 SPLITS = ("train", "dev", "test")
 
@@ -92,6 +98,31 @@ def build(
     return manifest
 
 
+def export_opf(
+    bench_dir: str | Path, splits: Sequence[str] = SPLITS, source: str = "synphi"
+) -> dict[str, dict[str, int]]:
+    """Write ``<split>.opf.jsonl`` for the upstream OPF CLI: canonical labels mapped through ``I2B2_TO_OPF``, spans
+    of subtypes OPF cannot represent (and the institutional extension) dropped. Returns kept / dropped span counts
+    per split."""
+    bench_dir = Path(bench_dir)
+    opf_map: dict[str, str | None] = {**I2B2_TO_OPF, **dict.fromkeys(INSTITUTIONAL_SUBTYPES, None)}
+    report: dict[str, dict[str, int]] = {}
+    for split in splits:
+        src = bench_dir / f"{split}.jsonl"
+        if not src.exists():
+            raise FileNotFoundError(f"{src} does not exist; build the benchmark first")
+        kept = dropped = 0
+        with (bench_dir / f"{split}.opf.jsonl").open("w", encoding="utf-8") as fh:
+            for doc in read_jsonl(src):
+                rec = to_opf_record(doc, opf_map, source)
+                n_kept = sum(len(v) for v in rec["spans"].values())
+                kept += n_kept
+                dropped += len(doc.spans) - n_kept
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        report[split] = {"kept": kept, "dropped": dropped}
+    return report
+
+
 def _load_sources(ns: argparse.Namespace) -> list[Doc]:
     docs: list[Doc] = []
     if ns.demo:
@@ -125,7 +156,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     b.add_argument("--mtsamples", help="path to mtsamples.csv")
     b.add_argument("--asclepius", type=int, default=0, help="number of Asclepius notes to stream from the HF hub")
     b.add_argument("--limit", type=int, default=0)
+    e = sub.add_parser("export-opf", help="write <split>.opf.jsonl for the upstream `opf train` / `opf eval` CLI")
+    e.add_argument("--bench", required=True, help="benchmark directory produced by `build`")
+    e.add_argument("--splits", nargs="+", default=list(SPLITS))
     ns = ap.parse_args(argv)
+    if ns.cmd == "export-opf":
+        print(json.dumps(export_opf(ns.bench, ns.splits), indent=2))
+        return
     profile = Profile.load(ns.profile)
     manifest = build(_load_sources(ns), profile, ns.out, ns.seed, ns.version)
     print(json.dumps({k: manifest[k] for k in ("version", "n_docs", "splits")}, indent=2))

@@ -7,10 +7,10 @@ pytest.importorskip("faker")
 from note_deid.data import Injector, Profile, demo_docs, inject_all, residual_spans, strip_placeholders
 from note_deid.data.phi_injection.generators import Generators
 from note_deid.data.phi_injection.templates import HEADERS, SENTENCES, render
-from note_deid.data.synphi import build
+from note_deid.data.synphi import build, export_opf, main
 from note_deid.eval import evaluate
-from note_deid.labels import I2B2_2014_SUBTYPES
-from note_deid.schema import Doc, read_jsonl
+from note_deid.labels import I2B2_2014_SUBTYPES, I2B2_TO_OPF, OPF_LABELS
+from note_deid.schema import Doc, from_opf_record, read_jsonl
 
 PROFILE = "configs/synphi/i2b2like.yaml"
 
@@ -106,6 +106,29 @@ def test_build_writes_splits_and_manifest_and_gold_is_self_consistent(tmp_path):
             assert rep.micro.f1 == 1.0 and rep.doc_leak_rate == 0.0
     ids = [i for s in manifest["source_ids"].values() for i in s]
     assert len(ids) == len(set(ids)) == 24
+
+
+def test_export_opf_writes_mapped_records_that_round_trip(tmp_path):
+    profile = Profile.load(PROFILE)
+    sources = [Doc(f"{d.doc_id}-{i}", d.text, [], dict(d.meta)) for i in range(2) for d in demo_docs()]
+    build(sources, profile, tmp_path / "synphi", seed=0, version="test")
+    main(["export-opf", "--bench", str(tmp_path / "synphi"), "--splits", "train"])
+    report = export_opf(tmp_path / "synphi", splits=("dev",))
+    assert set(report) == {"dev"} and report["dev"]["kept"] > 0
+    gold = {d.doc_id: d for d in read_jsonl(tmp_path / "synphi" / "train.jsonl")}
+    n = 0
+    with (tmp_path / "synphi" / "train.opf.jsonl").open(encoding="utf-8") as fh:
+        for line in fh:
+            back = from_opf_record(json.loads(line))
+            expected = sorted(
+                (s.start, s.end, I2B2_TO_OPF[s.label]) for s in gold[back.doc_id].spans if I2B2_TO_OPF[s.label]
+            )
+            assert sorted((s.start, s.end, s.label) for s in back.spans) == expected
+            assert {s.label for s in back.spans} <= set(OPF_LABELS)
+            n += 1
+    assert n == len(gold)
+    n_unsupported = sum(1 for d in gold.values() for s in d.spans if I2B2_TO_OPF[s.label] is None)
+    assert n_unsupported > 0  # the i2b2-like profile injects subtypes OPF cannot represent (e.g. AGE, PROFESSION)
 
 
 def test_injector_class_reports_targets_and_placed_counts():
