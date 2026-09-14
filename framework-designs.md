@@ -459,14 +459,19 @@ and dev-subset tuning the paid volume should stay well below that; all LLM runs 
 commercial LLM APIs allowed for all in-scope data; TC base = OPF with DeBERTa-v3 as control; recall-first protocol; no data
 files in git; prior artifacts imported after the skeleton (Appendix A); serialized, single-agent execution.
 
+**Decided (2026-09-14, license)**: code under Apache-2.0 (`LICENSE`, `NOTICE`; matches OPF, Transformers and OpenMed);
+documents, prompts, guidelines and fully synthetic data under CC BY 4.0 (`LICENSE-DOCS`); third-party corpora keep their
+own terms, so `synphi` is released as recipe + manifest with built text only for the synthetic subset, guideline examples
+must be synthetic, and released checkpoints are trained only on data whose terms allow it (`docs/datasets.md` §4).
+`CITATION.cff` added for the software citation.
+
 **Open** ▶ (with recommended defaults):
 1. INSTITUTIONAL label group in `synphi` — recommended **yes** (flag).
 2. LLM aliases: `llm-strong` and `llm-fast` model choices — recommended one frontier model and one cheap model from
    different providers, pinned by dated identifiers in `configs/litellm.models.yaml`.
 3. Human annotation budget for H11/H12 — recommended ≥ 100 notes adjudicated (or none: simulate with gold).
-4. Repository license — recommended Apache-2.0 (matches OPF/OpenMed). **The repository is now public and has no LICENSE file, which means all rights reserved by default; this needs a decision before anyone reuses the code.**
-5. Which prior artifacts exist and in what format (guideline version, annotation format, TC checkpoint) — Appendix A.
-6. Target venue and timeline.
+4. Which prior artifacts exist and in what format (guideline version, annotation format, TC checkpoint) — Appendix A.
+5. Target venue and timeline.
 
 ---
 

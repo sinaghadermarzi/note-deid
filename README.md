@@ -94,3 +94,15 @@ agreements. The primary benchmark (`synphi`) is built from open, PHI-free notes 
 P0 design → **P1 (now)** benchmark + evaluator + both baselines + complementarity analysis → P2 inference-time hybrids →
 P3 training-time hybrids and learning curves → P4 surrogation → P5 robustness and paper. Details in
 `framework-designs.md` §8.
+
+## License
+
+- **Code**: Apache License 2.0 (`LICENSE`, `NOTICE`).
+- **Documents, prompts, guidelines and fully synthetic data** (the built-in demo notes and any `synphi` build made only
+  from them): Creative Commons Attribution 4.0 International (`LICENSE-DOCS`).
+- **Third-party corpora keep their own terms.** A `synphi` build that contains Asclepius notes inherits CC BY-NC-SA 4.0,
+  and MTSamples-derived notes are for educational use with attribution to mtsamples.com, so those builds are shared as a
+  recipe (profile, seed, `manifest.json`) rather than as text. Gated corpora are never redistributed. Details in
+  `docs/datasets.md` §4.
+
+Cite the software with `CITATION.cff`.

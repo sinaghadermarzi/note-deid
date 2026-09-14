@@ -1,0 +1,9 @@
+note-deid
+Copyright 2026 Sina Ghadermarzi
+
+Source code in this repository is licensed under the Apache License, Version 2.0
+(see LICENSE). Documents, prompts, annotation guidelines and fully synthetic
+data in this repository are licensed under the Creative Commons Attribution 4.0
+International License (see LICENSE-DOCS). Third-party datasets are used under
+their own terms; see docs/datasets.md section 4 before redistributing any
+benchmark build or checkpoint derived from them.

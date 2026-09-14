@@ -71,3 +71,27 @@ files for HF training.
 
 `synphi-v0.1` = first build used in E1/E8; any change to sources, cleaning, generators or profiles bumps the version.
 Results always cite the version and manifest hash.
+
+## 4. Licensing and release policy
+
+Decided 2026-09-14 (`framework-designs.md` §10): code is Apache-2.0 (`LICENSE`); documents, prompts, guidelines and
+fully synthetic data are CC BY 4.0 (`LICENSE-DOCS`); third-party data keeps its own terms. A `synphi` build is a
+derivative work of its source notes, so what may be redistributed depends on the source:
+
+| Source notes | Terms | What may be redistributed |
+|---|---|---|
+| Built-in demo notes (`note_deid.data.samples`) | original, CC BY 4.0 | the built text and gold |
+| MTSamples | educational use with attribution to mtsamples.com; no explicit redistribution grant | the recipe (profile, seed, `manifest.json`); any derived release must attribute mtsamples.com |
+| Asclepius | CC BY-NC-SA 4.0 | the recipe; a released build must carry CC BY-NC-SA 4.0 with attribution and cannot be used commercially |
+| Gated corpora (i2b2/n2c2, PhysioNet) | DUA | nothing: no text, excerpts, offsets-with-text or guideline examples leave the DUA scope |
+
+Rules that follow:
+
+1. Publish `synphi` as profiles, seeds and manifests so any build regenerates exactly; publish built text only for the
+   synthetic subset. Results tables cite the version and manifest hash, never the notes.
+2. Guideline and prompt examples must be synthetic; examples drawn from annotated real notes are rewritten before the
+   guideline is committed.
+3. Checkpoints released with the paper are trained on data whose terms allow it. The Privacy Filter base is Apache-2.0,
+   so a checkpoint fine-tuned on demo or MTSamples-derived builds can be Apache-2.0 with attribution; a checkpoint
+   trained on Asclepius-derived text is non-commercial and is labeled as such or not released.
+4. Model outputs used as silver labels (H9) inherit the terms of the text they annotate.
