@@ -1,0 +1,29 @@
+# E1: complementarity of the LLM and the token classifier on synphi (RQ1). Requires a trained TC checkpoint and
+# API keys. Thresholds for fusion are tuned on the dev split before this test-split run.
+name: e1_complementarity
+benchmark:
+  path: data/synphi/v0.1
+  split: test
+  train_split: train
+detectors:
+  tc:
+    type: tc
+    model: models/opf-synphi-v0.1         # or a DeBERTa checkpoint from `python -m note_deid.tc.train`
+    label_map: null                       # null = checkpoint already uses canonical labels; opf_category for raw OPF
+    stride: 64
+  llm:
+    type: llm
+    alias: llm-strong
+    format: json_strings                  # the current pipeline (F1); see e8_formats.yaml for the ablation
+    guideline: prompts/guideline_v0.md
+fusion:
+  - {name: union}
+  - {name: label_routed, tau: 10}
+  - {name: confidence_gated, theta_hi: 0.9, theta_lo: 0.3, tau: 10}
+eval:
+  modes: [strict, relaxed, relaxed_typeless]
+  levels: [subtype, category]
+  hipaa_view: true
+  reference: tc
+  bootstrap: {n: 1000, seed: 0}
+output: results

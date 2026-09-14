@@ -172,7 +172,12 @@ class Injector:
             count(spans)
 
         # sentence insertions to reach the sampled targets, appended to random paragraphs
-        text_paras = [i for i, (t, _) in enumerate(body_paras) if not re.fullmatch(r"\n\s*\n", t) and t.strip()]
+        # insertion targets: real paragraphs only (skip separators and short header-like lines)
+        text_paras = [
+            i for i, (t, _) in enumerate(body_paras) if not re.fullmatch(r"\n\s*\n", t) and len(t.split()) >= 12
+        ]
+        if not text_paras:
+            text_paras = [i for i, (t, _) in enumerate(body_paras) if not re.fullmatch(r"\n\s*\n", t) and t.strip()]
         for label, target in targets.items():
             bank = SENTENCES.get(label)
             if not bank or not text_paras:

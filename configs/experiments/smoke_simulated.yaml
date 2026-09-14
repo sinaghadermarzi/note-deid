@@ -1,0 +1,32 @@
+# Offline end-to-end smoke run: simulated detectors on a synphi build (no models, no API keys).
+#   python -m note_deid.data.synphi build --profile configs/synphi/i2b2like.yaml --out data/synphi/demo --demo
+#   python -m note_deid.run --config configs/experiments/smoke_simulated.yaml
+name: smoke_simulated
+benchmark:
+  path: data/synphi/demo
+  split: test
+  train_split: train
+detectors:
+  tc:                       # "token classifier": misses rare labels, precise elsewhere
+    type: simulated
+    miss_rate: {default: 0.05, EMAIL: 0.9, FAX: 0.9, URL: 0.9, DEVICE: 0.9, HEALTHPLAN: 0.9, USERNAME: 0.9, PROFESSION: 0.8}
+    fp_rate: 0.02
+    boundary_noise: 0.05
+    score: 0.95
+  llm:                      # "LLM": uniform misses, some boundary drift
+    type: simulated
+    miss_rate: 0.2
+    fp_rate: 0.05
+    boundary_noise: 0.1
+    score: 1.0
+fusion:
+  - {name: union}
+  - {name: label_routed, tau: 10}
+  - {name: confidence_gated, theta_hi: 0.9, theta_lo: 0.3, tau: 10}
+eval:
+  modes: [strict, relaxed]
+  levels: [subtype, category]
+  hipaa_view: true
+  reference: tc
+  bootstrap: {n: 200, seed: 0}
+output: results
