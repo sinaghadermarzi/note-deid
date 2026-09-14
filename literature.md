@@ -138,8 +138,10 @@ classifier and analyses whether their error sets are complementary — the gap t
   de-identification.* arXiv:2605.03301 (2026) (V, abstract). 1,381 notes / 10,229 spans / 9 PHI categories, built with
   LLM pre-annotation + human adjudication and set-cover diversity sampling; four LLM teachers distilled into a DeBERTa-v3
   student (span P 0.89 / R 0.88 micro) that **loses macro recall on rare and institution-specific categories (0.81 vs 0.90
-  teacher)**; authors suggest hybrids of broad-coverage and specialized models. Dataset and model stated to be public
-  (location to be confirmed).
+  teacher)**; authors suggest hybrids of broad-coverage and specialized models. Stanford Medicine (Posada, Love, Datta,
+  Desai; the TiDE group); nine categories AGE, DATE, DOCTOR, HOSPITAL, ID, LOCATION, PATIENT, PHONE, WEB; teachers
+  Gemini 2.5 Pro/Flash, GPT-OSS-120B, Llama 4 Maverick (Gemini 2.5 Flash distilled). Released at
+  github.com/susom/shield_dataset (V) — a credible external test set for RQ6.
 - **LLMs-in-the-loop Part 2** — *Expert small AI models for anonymization and de-identification of PHI across multiple
   languages.* arXiv:2412.10918 (John Snow Labs, 2024) (V, abstract). Small NER models trained with LLM-in-the-loop data reach
   F1-micro 0.953–0.978 across eight languages and are claimed to beat GPT-4o.
@@ -200,8 +202,9 @@ grounding failures before hybrids are evaluated.
   (S1386505625004472) (V, snippet). Human-oriented guidelines in the prompt beat few-shot examples alone.
 - **Improving LLM-based event extraction with annotation guidelines.** Frontiers in AI 2026 (S). Guidelines improve both
   boundaries and previously missed entities.
-- **Guideline learning for in-context information extraction** — Pang et al., EMNLP 2023, arXiv:2310.05066 (K; verify
-  authorship). Learns guideline rules from errors on a dev set.
+- **Guideline learning for in-context information extraction** — Pang, Cao, Ding, Luo. EMNLP 2023, ACL Anthology
+  2023.emnlp-main.950 (V). Synthesizes guidelines from a few error cases and retrieves them at inference.
+  Related: *Instruction-tuning LLMs for event extraction with annotation guidelines*, arXiv:2502.16377 (S).
 - **Automatic prompt optimization**: ProTeGi (Pryzant et al., EMNLP 2023) (K); OPRO (Yang et al., ICLR 2024) (K); DSPy
   (Khattab et al., ICLR 2024) (K); Self-Refine (Madaan et al., NeurIPS 2023) (K).
 
@@ -270,11 +273,11 @@ methodological template (paired spans, TOST) for our surrogation experiments and
 | CEGS N-GRID 2016 (K) | 1,000 psychiatric intake records | i2b2-style | same DUA | as above |
 | PhysioNet `deid` gold standard (V) | 2,434 MIMIC-II nursing notes with surrogate PHI | names, dates, locations, MRN, phone, company | PhysioNet **credentialed** access (CITI + ID) | Gated; loader stub. |
 | MIMIC-IV-Note (K) | ~330k de-identified notes | none (PHI already removed → `___` placeholders) | PhysioNet credentialed | Candidate source for PHI re-injection once credentialed. |
-| **MTSamples** (K/S) | ~5k transcribed sample reports, ~40 specialties, no real PHI (contains placeholders like "Dr. X") | none | Public website; Kaggle mirror "Medical Transcriptions" | **Primary source text for the PHI-injection benchmark** after placeholder cleaning. |
+| **MTSamples** (V) | 5,043 transcribed sample reports, 40 specialties; "all names and dates have been changed (or removed)"; placeholders like "Dr. X" | none | Public website; use for educational purposes with attribution to mtsamples.com; Kaggle mirror "Medical Transcriptions" | **Primary source text for the PHI-injection benchmark** after placeholder cleaning; derived text shared only with attribution and for educational/research use. |
 | **Asclepius synthetic clinical notes** — Kweon et al., Findings of ACL 2024, arXiv:2309.00237 (K) | ~158k synthetic notes generated from PMC-Patients case reports | none | HF `starmpcc/Asclepius-Synthetic-Clinical-Notes`, CC-BY-NC-SA 4.0 | Secondary source text for injection (discharge-summary style). |
-| Synthetic4Health (S) | synthetic clinical letters | — | to verify | Candidate; verify license and content before use. |
+| Synthetic4Health (V) — Frontiers in Digital Health 2025, arXiv:2409.09501, HECTA-UoM | a *generation system* for de-identified synthetic clinical letters, built on MIMIC-IV-Note discharge summaries | clinical entities (SNOMED), not PHI | code on GitHub; underlying letters derive from credentialed MIMIC data | Not an open corpus of notes; not used. |
 | **ASQ-PHI** — Data in Brief 2026, PMC12926592 (V) | 1,051 synthetic single-line clinical queries, 2,973 PHI elements, 13 Safe Harbor types | JSON per element | Mendeley Data, **MIT** | Auxiliary (short queries, not notes); useful for over-redaction tests on PHI-free items. |
-| SHIELD (V, abstract) | 1,381 notes, 10,229 spans, 9 categories | 9 | stated public; location TBC | Potential external test set if genuinely released. |
+| SHIELD (V) | 1,381 notes, 10,229 spans, surrogate-replaced | 9 coarse (AGE, DATE, DOCTOR, HOSPITAL, ID, LOCATION, PATIENT, PHONE, WEB) | github.com/susom/shield_dataset | External test set (map 9 categories onto ours) for RQ6. |
 | `auren-research/pii-shield` (S) | 531k English documents, 5 domains, silver-labeled by a GLiNER2 PII model; 6 languages | PII (non-clinical) | HF, license TBC | Silver, non-clinical; optional pre-training data only. |
 | NVIDIA Nemotron-PII (S) | synthetic PII documents (train set of OpenMed-PII) | ~55 types | HF | Non-clinical PII pre-training / label-mapping reference. |
 | AI4Privacy pii-masking-300k / open-pii-masking-500k (K) | multi-domain synthetic PII | ~50 types | HF, open | Non-clinical; optional. |

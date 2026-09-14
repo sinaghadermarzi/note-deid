@@ -7,7 +7,7 @@ model_list:
   - model_name: llm-strong            # frontier model used for the main S_LLM baseline and the H5 editor
     litellm_params:
       model: openai/gpt-5
-      temperature: 0
+      reasoning_effort: low           # reasoning models fix temperature at 1; unsupported params are dropped (drop_params)
   - model_name: llm-fast              # cheaper model for verification calls (H3), routing experiments (H7), silver labels (H9)
     litellm_params:
       model: anthropic/claude-sonnet-5
@@ -30,6 +30,7 @@ litellm_settings:
     disk_cache_dir: .cache/litellm
   num_retries: 3
   request_timeout: 120
+  drop_params: true       # silently drop provider-unsupported params instead of raising
 
 note_deid:
   concurrency: 1          # requests in flight; keep at 1 unless rate limits allow more

@@ -1,0 +1,431 @@
+"""Config-driven experiment runner.
+
+    python -m note_deid.run --config configs/experiments/smoke_simulated.yaml [--limit N] [--out DIR]
+
+Pipeline: load a benchmark split -> run detectors (tc / llm / saved predictions / simulated) -> apply fusion
+policies -> evaluate every prediction set (modes x levels, HIPAA view, frequency buckets, paired bootstrap against a
+reference system) -> complementarity statistics across base detectors -> write ``results/<name>/<run-id>/``
+containing config.yaml, predictions/*.jsonl, metrics.json, complementarity.json, cost.json and summary.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import random
+import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from note_deid.eval import (
+    by_bucket,
+    complementarity,
+    evaluate,
+    evaluate_docs,
+    label_support,
+    paired_bootstrap,
+    report_markdown,
+)
+from note_deid.hybrid import GateConfig, confidence_gated, label_routed, union
+from note_deid.labels import OPENMED_TO_I2B2, OPF_TO_I2B2_CATEGORY, infer_label_map
+from note_deid.schema import Doc, Span, read_jsonl, write_jsonl
+
+LABEL_MAPS = {"opf_category": OPF_TO_I2B2_CATEGORY, "openmed": OPENMED_TO_I2B2, None: None, "none": None}
+
+
+# -- detectors -----------------------------------------------------------------------------------------------------
+class SimulatedDetector:
+    """Gold spans with deterministic misses and false positives (pipeline tests; system simulations).
+
+    ``miss_rate`` is global or per label ({"default": 0.1, "EMAIL": 0.9}); ``fp_rate`` adds spurious spans per gold
+    span; ``boundary_noise`` shrinks a fraction of spans by one character (strict vs relaxed differences).
+    """
+
+    def __init__(
+        self,
+        name: str,
+        miss_rate: float | Mapping[str, float] = 0.1,
+        fp_rate: float = 0.0,
+        boundary_noise: float = 0.0,
+        score: float = 0.9,
+        seed: int = 0,
+    ) -> None:
+        self.name = name
+        self.miss_rate = miss_rate
+        self.fp_rate = fp_rate
+        self.boundary_noise = boundary_noise
+        self.score = score
+        self.seed = seed
+        self._gold: dict[str, list[Span]] = {}  # text -> gold spans of the docs last detected (for the H3 hooks)
+
+    def _rate(self, label: str) -> float:
+        if isinstance(self.miss_rate, Mapping):
+            return float(self.miss_rate.get(label, self.miss_rate.get("default", 0.0)))
+        return float(self.miss_rate)
+
+    def detect(self, docs: Sequence[Doc]) -> list[list[Span]]:
+        out: list[list[Span]] = []
+        for d in docs:
+            rng = random.Random(f"{self.seed}:{self.name}:{d.doc_id}")
+            self._gold[d.text] = list(d.spans)
+            spans: list[Span] = []
+            for s in d.spans:
+                if rng.random() < self._rate(s.label):
+                    continue
+                start, end = s.start, s.end
+                if self.boundary_noise and rng.random() < self.boundary_noise and end - start > 2:
+                    end -= 1
+                spans.append(Span(start, end, s.label, d.text[start:end], self.name, self.score))
+                if self.fp_rate and rng.random() < self.fp_rate:
+                    pos = rng.randrange(0, max(1, len(d.text) - 6))
+                    fp_end = min(len(d.text), pos + 5)
+                    if not any(x.start < fp_end and pos < x.end for x in d.spans) and fp_end > pos:
+                        spans.append(Span(pos, fp_end, s.label, d.text[pos:fp_end], self.name, self.score / 2))
+            out.append(spans)
+        return out
+
+    # Oracle stand-ins for the H3 hooks so the offline smoke run exercises the full gate (Appendix C).
+    @staticmethod
+    def _overlaps_gold(gold: Sequence[Span], span: Span) -> bool:
+        return any(g.label == span.label and g.start < span.end and span.start < g.end for g in gold)
+
+    def verify(self, doc: Doc, span: Span) -> bool:
+        """Verifier stand-in: True iff the span overlaps a gold span with the same label."""
+        return self._overlaps_gold(doc.spans, span)
+
+    def forced_prob(self, text: str, span: Span, reduce: str = "mean") -> float:
+        """Forced-probability stand-in: ``score`` on a same-label gold overlap, else 0.05."""
+        return self.score if self._overlaps_gold(self._gold.get(text, ()), span) else 0.05
+
+
+class SavedPredictions:
+    def __init__(self, name: str, path: str | Path) -> None:
+        self.name = name
+        self.by_id = {d.doc_id: d.spans for d in read_jsonl(path)}
+
+    def detect(self, docs: Sequence[Doc]) -> list[list[Span]]:
+        return [list(self.by_id.get(d.doc_id, [])) for d in docs]
+
+
+def resolve_tc_label_map(name: str | None, model_labels: Sequence[str]) -> Mapping[str, str | None] | None:
+    """Mapping table for a token-classification checkpoint. ``"auto"`` infers it from the checkpoint's labels;
+    ``None`` / ``"none"`` is accepted only when the checkpoint already emits canonical labels, because a raw OPF or
+    OpenMed checkpoint evaluated without its mapping turns every correct detection into a false positive plus a
+    false negative."""
+    if name == "auto":
+        name = infer_label_map(model_labels)
+    elif name in (None, "none"):
+        inferred = infer_label_map(model_labels)
+        if inferred is not None:
+            raise ValueError(
+                f"checkpoint emits non-canonical labels {sorted(model_labels)}; set label_map: {inferred} (or auto). "
+                "A category-level mapping is only comparable at eval levels: [category]."
+            )
+        name = None
+    if name not in LABEL_MAPS:
+        raise ValueError(f"unknown label_map {name!r}; expected auto, none, opf_category or openmed")
+    return LABEL_MAPS[name]
+
+
+def build_detector(name: str, cfg: Mapping[str, Any], llm_client: Any = None) -> Any:
+    kind = cfg.get("type", name)
+    if kind == "simulated":
+        return SimulatedDetector(
+            name,
+            cfg.get("miss_rate", 0.1),
+            cfg.get("fp_rate", 0.0),
+            cfg.get("boundary_noise", 0.0),
+            cfg.get("score", 0.9),
+            cfg.get("seed", 0),
+        )
+    if kind == "predictions":
+        return SavedPredictions(name, cfg["path"])
+    if kind == "tc":
+        from note_deid.tc.detector import TCDetector
+
+        det = TCDetector(
+            cfg["model"],
+            label_map=None,
+            device=cfg.get("device"),
+            max_length=cfg.get("max_length"),
+            stride=int(cfg.get("stride", 64)),
+            batch_size=int(cfg.get("batch_size", 8)),
+            score=cfg.get("score", "min"),
+            tokenizer=cfg.get("tokenizer"),
+        )
+        det.label_map = resolve_tc_label_map(cfg.get("label_map"), det.model_labels())
+        det.name = name
+        return det
+    if kind == "llm":
+        from note_deid.llm.client import LLMClient
+        from note_deid.llm.detector import LLMDetector
+
+        client = llm_client or LLMClient(cfg.get("client_config", "configs/litellm.models.yaml"))
+        det = LLMDetector(
+            client,
+            cfg["alias"],
+            fmt=cfg.get("format", "json_strings"),
+            guideline_path=cfg.get("guideline"),
+            occurrences=cfg.get("occurrences", "all"),
+            fuzzy_threshold=float(cfg.get("fuzzy_threshold", 90.0)),
+            segment_chars=int(cfg.get("segment_chars", 1500)),
+            max_tokens=cfg.get("max_tokens"),
+            mock_response=cfg.get("mock_response"),
+        )
+        det.name = name
+        return det
+    raise ValueError(f"unknown detector type {kind!r} for {name!r}")
+
+
+# -- fusion ----------------------------------------------------------------------------------------------------------
+@dataclass
+class FusionResult:
+    spans: list[list[Span]]
+    decisions: list[dict[str, Any]] = field(default_factory=list)  # H3 decision log, one row per candidate
+    stats: dict[str, Any] = field(default_factory=dict)  # H3: verifier calls and accept/drop counts per rule
+
+
+def _verifier_hook(detector: Any, doc: Doc) -> Callable[[Span], bool] | None:
+    if detector is None or not hasattr(detector, "verify"):
+        return None
+    return lambda span: bool(detector.verify(doc, span))
+
+
+def _forced_prob_hook(detector: Any, doc: Doc, reduce: str) -> Callable[[Span], float] | None:
+    if detector is None or not hasattr(detector, "forced_prob"):
+        return None
+    return lambda span: float(detector.forced_prob(doc.text, span, reduce))
+
+
+def apply_fusion(
+    spec: Mapping[str, Any],
+    docs: Sequence[Doc],
+    preds: Mapping[str, list[list[Span]]],
+    train_counts: Mapping[str, int],
+    detectors: Mapping[str, Any] | None = None,
+) -> FusionResult:
+    """Run one fusion policy over all documents.
+
+    ``detectors`` (name -> detector object) supplies the H3 arbitration hooks: the LLM detector's
+    ``verify(doc, span)`` (skipped when ``spec["verify"]`` is false) and the TC detector's
+    ``forced_prob(text, span, reduce)`` (``spec["forced_reduce"]``: mean | min). Without a hook the gate drops the
+    candidates it cannot arbitrate and the decision log records the rule with the ``:no-verifier`` suffix.
+    """
+    kind = spec["name"]
+    tc, llm = spec.get("tc", "tc"), spec.get("llm", "llm")
+    detectors = detectors or {}
+    result = FusionResult([])
+    rules: dict[str, dict[str, int]] = {}
+    verifier_calls = 0
+    for i, d in enumerate(docs):
+        outputs = {k: v[i] for k, v in preds.items()}
+        if kind == "union":
+            result.spans.append(union(outputs, d.text, priority=tuple(spec.get("priority", (tc, llm)))))
+        elif kind == "label_routed":
+            result.spans.append(
+                label_routed(
+                    outputs,
+                    train_counts,
+                    int(spec.get("tau", 10)),
+                    tc,
+                    llm,
+                    both=set(spec.get("both", ())),
+                    text=d.text,
+                )
+            )
+        elif kind == "confidence_gated":
+            cfg = GateConfig(
+                theta_hi=float(spec.get("theta_hi", 0.9)),
+                theta_lo=float(spec.get("theta_lo", 0.3)),
+                tau=int(spec.get("tau", 10)),
+                tc=tc,
+                llm=llm,
+            )
+            gate = confidence_gated(
+                outputs,
+                train_counts,
+                cfg,
+                verifier=_verifier_hook(detectors.get(llm), d) if spec.get("verify", True) else None,
+                tc_forced_prob=_forced_prob_hook(detectors.get(tc), d, str(spec.get("forced_reduce", "mean"))),
+                text=d.text,
+            )
+            result.spans.append(gate.spans)
+            verifier_calls += gate.verifier_calls
+            for dec in gate.decisions:
+                s = dec.span
+                result.decisions.append(
+                    {
+                        "doc_id": d.doc_id,
+                        "start": s.start,
+                        "end": s.end,
+                        "label": s.label,
+                        "source": s.source,
+                        "score": s.score,
+                        "rule": dec.rule,
+                        "accepted": dec.accepted,
+                    }
+                )
+                counts = rules.setdefault(dec.rule, {"accepted": 0, "dropped": 0})
+                counts["accepted" if dec.accepted else "dropped"] += 1
+        else:
+            raise ValueError(f"unknown fusion {kind!r}")
+    if kind == "confidence_gated":
+        result.stats = {"verifier_calls": verifier_calls, "rules": dict(sorted(rules.items()))}
+    return result
+
+
+# -- run -------------------------------------------------------------------------------------------------------------
+def load_config(path: str | Path) -> dict[str, Any]:
+    with Path(path).open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def run(config: Mapping[str, Any], out_dir: str | Path | None = None, limit: int | None = None) -> Path:
+    cfg = dict(config)
+    bench = cfg["benchmark"]
+    docs = list(read_jsonl(Path(bench["path"]) / f"{bench.get('split', 'test')}.jsonl"))
+    limit = limit if limit is not None else bench.get("limit")
+    if limit:
+        docs = docs[: int(limit)]
+    train_counts: dict[str, int] = {}
+    train_split = bench.get("train_split", "train")
+    train_path = Path(bench["path"]) / f"{train_split}.jsonl"
+    if train_path.exists():
+        train_counts = dict(label_support(read_jsonl(train_path)))
+
+    run_id = (
+        time.strftime("%Y%m%d-%H%M%S")
+        + "-"
+        + hashlib.sha256(yaml.safe_dump(cfg, sort_keys=True).encode()).hexdigest()[:6]
+    )
+    out = Path(out_dir or cfg.get("output", "results")) / cfg.get("name", "run") / run_id
+    (out / "predictions").mkdir(parents=True, exist_ok=True)
+    (out / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+    # detectors
+    llm_client = None
+    preds: dict[str, list[list[Span]]] = {}
+    base_names: list[str] = []
+    detectors: dict[str, Any] = {}
+    for name, dcfg in (cfg.get("detectors") or {}).items():
+        det = build_detector(name, dcfg, llm_client)
+        if dcfg.get("type", name) == "llm":
+            llm_client = det.client
+        detectors[name] = det
+        preds[name] = det.detect(docs)
+        base_names.append(name)
+        write_jsonl(
+            out / "predictions" / f"{name}.jsonl",
+            [Doc(d.doc_id, d.text, p, {}) for d, p in zip(docs, preds[name], strict=True)],
+        )
+
+    # fusion
+    fusion_stats: dict[str, Any] = {}
+    for spec in cfg.get("fusion") or []:
+        fname = spec.get("as") or spec["name"]
+        fused = apply_fusion(spec, docs, {k: preds[k] for k in base_names}, train_counts, detectors)
+        preds[fname] = fused.spans
+        write_jsonl(
+            out / "predictions" / f"{fname}.jsonl",
+            [Doc(d.doc_id, d.text, p, {}) for d, p in zip(docs, preds[fname], strict=True)],
+        )
+        if fused.decisions:
+            with (out / "predictions" / f"{fname}.decisions.jsonl").open("w", encoding="utf-8") as fh:
+                for row in fused.decisions:
+                    fh.write(json.dumps(row) + "\n")
+        if fused.stats:
+            fusion_stats[fname] = fused.stats
+
+    # evaluation
+    ev = cfg.get("eval") or {}
+    modes = ev.get("modes", ["strict", "relaxed"])
+    levels = ev.get("levels", ["subtype"])
+    reference = ev.get("reference")
+    metrics: dict[str, Any] = {
+        "n_docs": len(docs),
+        "train_counts": train_counts,
+        "fusion": fusion_stats,
+        "systems": {},
+    }
+    summary_lines = [
+        f"# {cfg.get('name', 'run')} — {run_id}",
+        "",
+        f"{len(docs)} documents; train label counts from `{train_split}`.",
+        "",
+    ]
+    for fname, st in fusion_stats.items():
+        per_rule = "; ".join(f"{r} {c['accepted']}/{c['accepted'] + c['dropped']}" for r, c in st["rules"].items())
+        summary_lines += [
+            f"{fname}: {st['verifier_calls']} verifier calls; accepted/candidates per rule: {per_rule}",
+            "",
+        ]
+    for name, spans in preds.items():
+        pred_map = {d.doc_id: p for d, p in zip(docs, spans, strict=True)}
+        metrics["systems"][name] = {}
+        for mode in modes:
+            for level in levels:
+                rep = evaluate(docs, pred_map, mode=mode, level=level)
+                entry: dict[str, Any] = rep.to_dict()
+                if level == "subtype" and train_counts:
+                    entry["by_bucket"] = {b: v.to_dict() for b, v in by_bucket(rep.per_label, train_counts).items()}
+                if ev.get("hipaa_view", True) and level == "subtype":
+                    entry["hipaa"] = evaluate(docs, pred_map, mode=mode, level=level, hipaa_only=True).to_dict()
+                if reference and reference in preds and reference != name and level == "subtype":
+                    ref_map = {d.doc_id: p for d, p in zip(docs, preds[reference], strict=True)}
+                    a = evaluate_docs(docs, pred_map, mode=mode, level=level)
+                    b = evaluate_docs(docs, ref_map, mode=mode, level=level)
+                    bs = ev.get("bootstrap") or {}
+                    entry["vs_reference"] = {
+                        m: paired_bootstrap(a, b, m, int(bs.get("n", 1000)), int(bs.get("seed", 0))).to_dict()
+                        for m in ("recall", "precision", "f1")
+                    }
+                metrics["systems"][name][f"{mode}/{level}"] = entry
+                if level == "subtype":
+                    summary_lines += [f"## {name} ({mode})", "", report_markdown(rep), ""]
+    (out / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+
+    # complementarity across base detectors
+    if len(base_names) >= 2:
+        comp = {}
+        for mode in modes:
+            c = complementarity(
+                docs, {n: {d.doc_id: p for d, p in zip(docs, preds[n], strict=True)} for n in base_names}, mode=mode
+            )
+            comp[mode] = c.to_dict()
+            o = c.overall
+            summary_lines += [
+                f"## complementarity ({mode})",
+                "",
+                f"recall: {o.recall}; oracle-union recall {o.oracle_union_recall:.3f}; intersection recall "
+                f"{o.intersection_recall:.3f}; pairs: "
+                + "; ".join(f"{p.a}/{p.b} Jaccard {p.jaccard:.3f}, McNemar p {p.mcnemar_p:.3g}" for p in o.pairs),
+                "",
+            ]
+        (out / "complementarity.json").write_text(json.dumps(comp, indent=2) + "\n", encoding="utf-8")
+
+    # cost
+    cost = llm_client.cost_summary() if llm_client is not None else {}
+    (out / "cost.json").write_text(json.dumps(cost, indent=2) + "\n", encoding="utf-8")
+    if llm_client is not None:
+        llm_client.write_log(out / "llm_calls.jsonl")
+    (out / "summary.md").write_text("\n".join(summary_lines), encoding="utf-8")
+    return out
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--limit", type=int)
+    ap.add_argument("--out")
+    ns = ap.parse_args(argv)
+    out = run(load_config(ns.config), ns.out, ns.limit)
+    print(f"results written to {out}")
+
+
+if __name__ == "__main__":
+    main()
