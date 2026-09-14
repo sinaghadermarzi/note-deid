@@ -1,0 +1,36 @@
+# LiteLLM model aliases used by experiment configs. API keys come from the environment only
+# (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...); never commit keys.
+#
+# Pin dated model snapshots before running paper experiments and record the identifier in every results manifest.
+# Verify identifiers against the provider docs / `litellm.get_valid_models()` (names below are placeholders to confirm).
+model_list:
+  - model_name: llm-strong            # frontier model used for the main S_LLM baseline and the H5 editor
+    litellm_params:
+      model: openai/gpt-5
+      temperature: 0
+  - model_name: llm-fast              # cheaper model for verification calls (H3), routing experiments (H7), silver labels (H9)
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      temperature: 0
+  - model_name: llm-strong-alt        # second provider for cross-model checks
+    litellm_params:
+      model: anthropic/claude-opus-5
+      temperature: 0
+  - model_name: llm-local             # optional: OpenAI-compatible local server (vLLM on the A100 node, Ollama on a Mac)
+    litellm_params:
+      model: openai/Qwen/Qwen3-32B
+      api_base: http://localhost:8000/v1
+      api_key: EMPTY
+      temperature: 0
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: disk
+    disk_cache_dir: .cache/litellm
+  num_retries: 3
+  request_timeout: 120
+
+note_deid:
+  concurrency: 1          # requests in flight; keep at 1 unless rate limits allow more
+  log_cost: true
