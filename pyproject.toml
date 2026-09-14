@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,10 +7,16 @@ name = "note-deid"
 version = "0.0.1"
 description = "Hybrid LLM + token-classifier de-identification of clinical notes: research framework"
 readme = "README.md"
+authors = [{name = "Sina Ghadermarzi"}]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 dependencies = [
   "pyyaml>=6.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/sinaghadermarzi/note-deid"
 
 [project.optional-dependencies]
 # LLM backend (commercial APIs and OpenAI-compatible local servers through LiteLLM)
