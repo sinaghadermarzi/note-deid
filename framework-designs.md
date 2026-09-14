@@ -392,9 +392,12 @@ splits, seeds. Runs write `results/<exp>/<run-id>/{predictions.jsonl, metrics.js
 
 - `AutoModelForTokenClassification` for OPF (`openai/privacy-filter`; native 128k context, no chunking), DeBERTa-v3
   (512-token windows with stride), OpenMed-PII; BIOES/BIO decoding with span probabilities retained.
-- Training paths: (i) `opf train train.jsonl --output-dir …` with JSONL produced by `schema.to_opf_record` (OPF label
-  space, mapped labels only); (ii) HF `Trainer` for head extension (H13) and for DeBERTa baselines; seqeval for token-level
-  checks, our evaluator for entity-level numbers.
+- Training paths: (i) `opf train train.opf.jsonl --output-dir …` with JSONL produced by `synphi export-opf`
+  (`schema.to_opf_record`; OPF label space, mapped labels only); (ii) HF `Trainer` for head extension (H13) and for
+  DeBERTa baselines; seqeval for token-level checks, our evaluator for entity-level numbers. Convention: path (ii)
+  (`configs/train/opf_finetune.yaml`) trains the 28-label head on the unified JSONL, so its checkpoints emit canonical
+  subtypes; a native-OPF checkpoint from path (i) is evaluated through `label_map: opf_category` at category level
+  only, and the runner refuses a checkpoint whose labels are neither canonical nor mapped.
 - Model registry: `configs/train/*.yaml` (base checkpoint, label set, lr, epochs, batch, max length, precision, seeds).
 
 ### 7.4 Hardware matrix

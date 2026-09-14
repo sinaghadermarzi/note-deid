@@ -3,7 +3,7 @@
 ``evaluate`` is the entry point; ``evaluate_docs`` returns per-document counts that the bootstrap and bucket
 analyses resample or regroup. Labels can be evaluated at ``subtype`` (28 leaf labels), ``category`` (7) or
 ``binary`` (PHI / not) level, optionally restricted to the HIPAA Safe Harbor view (``hipaa_only``: HIPAA subtypes
-only, AGE counted only when the mention is >= 90).
+only, AGE counted only when the mention is >= 90, year-only DATE mentions excluded).
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ BINARY_LABEL = "PHI"
 
 _TOKEN_RE = re.compile(r"\w+|[^\w\s]")
 _INT_RE = re.compile(r"\d{1,3}")
+_YEAR_ONLY_RE = re.compile(r"^\W*(?:1[89]|20)\d{2}\W*$")  # a bare year is not a Safe Harbor date element
 
 
 @dataclass(frozen=True)
@@ -79,10 +80,14 @@ def relabel(span: Span, level: str) -> Span:
 
 
 def is_hipaa_span(span: Span, text: str) -> bool:
-    """HIPAA Safe Harbor view: HIPAA subtypes, and AGE only when the mentioned age is >= 90."""
+    """HIPAA Safe Harbor view: HIPAA subtypes, AGE only when the mentioned age is >= 90, and DATE only when the
+    mention carries more than a year (Safe Harbor excludes years; i2b2 annotates them as DATE anyway)."""
+    surface = text[span.start : span.end] or span.text
     if span.label == "AGE":
-        m = _INT_RE.search(text[span.start : span.end] or span.text)
+        m = _INT_RE.search(surface)
         return bool(m) and int(m.group()) >= 90
+    if span.label == "DATE" and _YEAR_ONLY_RE.match(surface):
+        return False
     return span.label in HIPAA_SUBTYPES
 
 

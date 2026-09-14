@@ -8,8 +8,10 @@ benchmark:
 detectors:
   tc:
     type: tc
-    model: models/opf-synphi-v0.1         # or a DeBERTa checkpoint from `python -m note_deid.tc.train`
-    label_map: null                       # null = checkpoint already uses canonical labels; opf_category for raw OPF
+    model: models/opf-synphi-v0.1         # 28-label checkpoint from `python -m note_deid.tc.train` (or DeBERTa)
+    label_map: auto                       # auto = infer from the checkpoint's labels: none for canonical labels,
+                                          # opf_category for a native OPF checkpoint (then only levels: [category]
+                                          # is comparable). The runner refuses unmapped non-canonical labels.
     stride: 64
   llm:
     type: llm

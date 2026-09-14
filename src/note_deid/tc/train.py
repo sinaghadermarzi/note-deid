@@ -7,8 +7,9 @@ i2b2_categories | opf8 | binary), train_jsonl, dev_jsonl,
 output_dir, learning_rate, epochs, per_device_batch_size, gradient_accumulation, max_length, stride, precision
 (bf16 | fp16 | fp32), seeds (list; the first is used unless --seed is given), scheme (bioes | bio).
 
-For OpenAI Privacy Filter the alternative path is the upstream CLI: ``opf train <train.jsonl>`` with JSONL produced by
-``note_deid.schema.to_opf_record`` (labels mapped with ``I2B2_TO_OPF``).
+``train_jsonl`` / ``dev_jsonl`` are the unified files written by ``synphi build``; gold labels are mapped into the
+chosen label space here. For the native OpenAI Privacy Filter label space the alternative path is the upstream CLI on
+the export written by ``python -m note_deid.data.synphi export-opf``: ``opf train <train.opf.jsonl>``.
 """
 
 from __future__ import annotations

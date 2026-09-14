@@ -66,8 +66,12 @@ python -m note_deid.run --config configs/experiments/smoke_simulated.yaml
 # benchmark from open notes (mtsamples.csv from the public mirror; Asclepius streamed from the HF hub)
 python -m note_deid.data.synphi build --profile configs/synphi/i2b2like.yaml --out data/synphi/v0.1 \
     --mtsamples data/raw/mtsamples/mtsamples.csv --asclepius 1000 --seed 0
-# token classifier (DeBERTa path; OPF via `opf train` with schema.to_opf_record)
+# token classifier, HF path: 28-label head fine-tuned on the unified train/dev JSONL (OPF or a DeBERTa base model)
 python -m note_deid.tc.train --config configs/train/opf_finetune.yaml
+# token classifier, native-OPF path: export OPF-shaped JSONL (8 labels; unsupported subtypes dropped), then the
+# upstream CLI. Such a checkpoint needs `label_map: opf_category` and is only comparable at `levels: [category]`.
+python -m note_deid.data.synphi export-opf --bench data/synphi/v0.1
+opf train data/synphi/v0.1/train.opf.jsonl --output-dir models/opf-native-synphi-v0.1
 # E1 complementarity (LLM alias from configs/litellm.models.yaml; keys from the environment)
 python -m note_deid.run --config configs/experiments/e1_complementarity.yaml
 ```
