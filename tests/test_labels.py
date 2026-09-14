@@ -1,3 +1,5 @@
+import pytest
+
 from note_deid.labels import (
     HIPAA_SUBTYPES,
     I2B2_2014_SUBTYPES,
@@ -8,6 +10,7 @@ from note_deid.labels import (
     SUBTYPE_TO_CATEGORY,
     bioes_tags,
     frequency_bucket,
+    infer_label_map,
     map_label,
     normalize_label,
 )
@@ -37,6 +40,19 @@ def test_openmed_mapping_targets_are_canonical():
     assert map_label("E-mail", OPENMED_TO_I2B2) == "EMAIL"  # label name that looks like a BIOES prefix
     assert map_label("blood_type", OPENMED_TO_I2B2) is None
     assert map_label("something_new", OPENMED_TO_I2B2) is None
+
+
+def test_infer_label_map_recognizes_checkpoint_label_spaces():
+    assert infer_label_map(["O", "B-PATIENT", "E-PATIENT", "S-DATE"]) is None
+    assert infer_label_map(["NAME", "DATE", "PHI"]) is None  # category / binary heads are canonical too
+    assert infer_label_map(bioes_tags(OPF_LABELS)) == "opf_category"
+    assert infer_label_map(["B-Medical_Record-Number", "I-phone_number", "B-Blood_Type"]) == "openmed"
+    with pytest.raises(ValueError, match="cannot infer"):
+        infer_label_map(["B-FOO", "I-BAR"])
+    with pytest.raises(ValueError, match="cannot infer"):
+        infer_label_map(["B-PATIENT", "S-private_date"])  # mixed spaces are refused, not guessed
+    with pytest.raises(ValueError, match="no entity labels"):
+        infer_label_map(["O"])
 
 
 def test_frequency_buckets():

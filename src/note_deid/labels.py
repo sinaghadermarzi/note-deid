@@ -8,7 +8,7 @@ maps its native labels to this set; every model backend maps to/from it.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 # -- i2b2 2014 taxonomy (Stubbs & Uzuner 2015) -------------------------------------------------------------------
 I2B2_2014_CATEGORIES: dict[str, tuple[str, ...]] = {
@@ -27,7 +27,8 @@ SUBTYPE_TO_CATEGORY: dict[str, str] = {s: c for c, subs in I2B2_2014_CATEGORIES.
 INSTITUTIONAL_SUBTYPES: tuple[str, ...] = ("INSTITUTIONAL",)
 
 # Subtypes counted in the i2b2-2014 "HIPAA-only" view (Stubbs et al. 2015; verify against the corpus paper table).
-# AGE is Safe-Harbor PHI only when >= 90; the evaluator applies that rule when computing the HIPAA view.
+# AGE is Safe-Harbor PHI only when >= 90 and a bare year is not a Safe-Harbor date element; the evaluator applies
+# both rules when computing the HIPAA view.
 HIPAA_SUBTYPES: frozenset[str] = frozenset(
     {
         "PATIENT",
@@ -239,6 +240,37 @@ def map_label(label: str, table: Mapping[str, str | None], strict: bool = False)
 def bioes_tags(labels: tuple[str, ...] | list[str]) -> list[str]:
     """Token-classification class list for a label set: ['O', 'B-x', 'I-x', 'E-x', 'S-x', ...]."""
     return ["O"] + [f"{p}-{lab}" for lab in labels for p in ("B", "I", "E", "S")]
+
+
+# Labels a checkpoint may emit without any mapping: the 28 subtypes, the 7 categories, the binary label and the
+# optional institutional extension (the label spaces of ``note_deid.tc.train``).
+CANONICAL_MODEL_LABELS: frozenset[str] = (
+    frozenset(I2B2_2014_SUBTYPES) | frozenset(I2B2_2014_CATEGORIES) | frozenset(INSTITUTIONAL_SUBTYPES) | {"PHI"}
+)
+
+
+def infer_label_map(model_labels: Iterable[str]) -> str | None:
+    """Name of the mapping a checkpoint's labels need before evaluation: ``None`` when they are canonical,
+    ``"opf_category"`` for the native OpenAI Privacy Filter labels, ``"openmed"`` for OpenMed-PII.
+
+    BIO/BIOES prefixes and ``O`` are ignored. Raises ``ValueError`` for an empty, mixed or unknown label set so that
+    raw model labels never reach the evaluator silently.
+    """
+    labels = {strip_bio_prefix(x) for x in model_labels if x != "O"}
+    if not labels:
+        raise ValueError("checkpoint has no entity labels")
+    if labels <= CANONICAL_MODEL_LABELS:
+        return None
+    if labels <= set(OPF_LABELS):
+        return "opf_category"
+    known = sum(1 for x in labels if normalize_label(x) in OPENMED_TO_I2B2)
+    if known * 2 >= len(labels):
+        return "openmed"
+    unknown = sorted(labels - CANONICAL_MODEL_LABELS - set(OPF_LABELS))
+    raise ValueError(
+        f"cannot infer a label mapping for model labels {unknown}; pass label_map explicitly "
+        "(opf_category | openmed) or train with a canonical label space"
+    )
 
 
 # Training-frequency buckets used in every per-label analysis (framework-designs.md §2).
