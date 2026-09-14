@@ -30,11 +30,10 @@ finetune = [
   "sentencepiece>=0.2",
   "protobuf>=4",
 ]
-# Benchmark construction (synphi) and analysis
+# Benchmark construction (synphi) and open-corpus loaders
 data = [
   "faker>=30.0",
-  "pandas>=2.2",
-  "numpy>=1.26",
+  "datasets>=2.20",
 ]
 dev = [
   "pytest>=8.0",
