@@ -4,7 +4,8 @@ import pytest
 
 pytest.importorskip("faker")
 
-from note_deid.data import Profile, build, demo_docs
+from note_deid.data import Profile, demo_docs
+from note_deid.data.synphi import build
 from note_deid.run import SimulatedDetector, load_config, run
 from note_deid.schema import Doc, read_jsonl
 
