@@ -30,7 +30,11 @@ def test_opf_mapping_is_total_over_subtypes():
 def test_openmed_mapping_targets_are_canonical():
     assert all(v is None or v in I2B2_2014_SUBTYPES for v in OPENMED_TO_I2B2.values())
     assert normalize_label("B-Medical_Record-Number") == "medicalrecordnumber"
+    assert normalize_label("b-medical_record_number") == "medicalrecordnumber"  # lowercase BIO prefix
+    assert normalize_label("E-mail", strip_prefix=False) == "email"
     assert map_label("I-medical_record_number", OPENMED_TO_I2B2) == "MEDICALRECORD"
+    assert map_label("i-medical_record_number", OPENMED_TO_I2B2) == "MEDICALRECORD"
+    assert map_label("E-mail", OPENMED_TO_I2B2) == "EMAIL"  # label name that looks like a BIOES prefix
     assert map_label("blood_type", OPENMED_TO_I2B2) is None
     assert map_label("something_new", OPENMED_TO_I2B2) is None
 

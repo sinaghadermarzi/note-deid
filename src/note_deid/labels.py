@@ -200,21 +200,22 @@ OPENMED_TO_I2B2: dict[str, str | None] = {
 }
 
 # -- helpers -----------------------------------------------------------------------------------------------------
-_BIO_PREFIX = re.compile(r"^[BIESLU]-")
+_BIO_PREFIX = re.compile(r"^[BIESLU]-", re.IGNORECASE)
 _NON_ALNUM = re.compile(r"[^a-z0-9]")
 
 
 def strip_bio_prefix(tag: str) -> str:
-    """'B-PATIENT' -> 'PATIENT'; 'O' -> 'O'."""
+    """'B-PATIENT' -> 'PATIENT'; 'b-patient' -> 'patient'; 'O' -> 'O'. Case-insensitive on the prefix."""
     return _BIO_PREFIX.sub("", tag)
 
 
-def normalize_label(name: str) -> str:
-    """Lowercase, drop a BIO/BIOES prefix and all non-alphanumerics.
+def normalize_label(name: str, strip_prefix: bool = True) -> str:
+    """Lowercase and drop all non-alphanumerics, after removing a BIO/BIOES prefix unless ``strip_prefix=False``.
 
-    'B-Medical_Record-Number' -> 'medicalrecordnumber'
+    'B-Medical_Record-Number' -> 'medicalrecordnumber'; 'b-medical_record_number' -> 'medicalrecordnumber'
     """
-    return _NON_ALNUM.sub("", strip_bio_prefix(name).lower())
+    base = strip_bio_prefix(name) if strip_prefix else name
+    return _NON_ALNUM.sub("", base.lower())
 
 
 def map_label(label: str, table: Mapping[str, str | None], strict: bool = False) -> str | None:
@@ -225,9 +226,11 @@ def map_label(label: str, table: Mapping[str, str | None], strict: bool = False)
     """
     if label in table:
         return table[label]
-    key = normalize_label(label)
-    if key in table:
-        return table[key]
+    # Normalized key with the BIO prefix stripped, then without stripping so that a label whose own name starts
+    # like a prefix (e.g. 'E-mail') is not mangled.
+    for key in (normalize_label(label), normalize_label(label, strip_prefix=False)):
+        if key in table:
+            return table[key]
     if strict:
         raise KeyError(label)
     return None
