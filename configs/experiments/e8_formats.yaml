@@ -1,0 +1,15 @@
+# E8: LLM output-format / grounding ablation (RQ8, H15). Same model and guideline, four formats.
+name: e8_formats
+benchmark:
+  path: data/synphi/v0.1
+  split: dev
+detectors:
+  llm_json_strings: {type: llm, alias: llm-strong, format: json_strings, guideline: prompts/guideline_v0.md}
+  llm_json_anchored: {type: llm, alias: llm-strong, format: json_anchored, guideline: prompts/guideline_v0.md}
+  llm_inline_tags: {type: llm, alias: llm-strong, format: inline_tags, guideline: prompts/guideline_v0.md}
+  llm_segments: {type: llm, alias: llm-strong, format: segments, guideline: prompts/guideline_v0.md, segment_chars: 1500}
+eval:
+  modes: [strict, relaxed]
+  levels: [subtype]
+  hipaa_view: false
+output: results
