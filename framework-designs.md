@@ -43,7 +43,7 @@ structure of those failures**, and that the LLM can *manufacture* the training s
 | | S_LLM (guideline + LLM) | S_TC (fine-tuned token classifier) |
 |---|---|---|
 | Model | commercial API model via LiteLLM | OPF (1.5B MoE, 8 labels) fine-tuned; alternatives DeBERTa-v3, OpenMed-PII |
-| Supervision | annotation guideline text, refined from annotated notes | BIO/BIOES labels from annotated notes |
+| Supervision | annotation guideline text, expressed as a DSPy program and refined with GEPA (reflective prompt evolution) against annotated notes | BIO/BIOES labels from annotated notes |
 | Output | JSON list of `{text, label}` → exact string search → spans | token logits → BIOES decoding → spans with probabilities |
 | Determinism | no (even at T=0) | yes |
 | Cost / note | ~1–3k input tokens + output; seconds | milliseconds; negligible |
@@ -196,7 +196,7 @@ notes; area under the learning curve. Targets: label efficiency, especially for 
 (available in the benchmark). Expected: disagreement sampling dominates on rare labels because disagreements concentrate
 exactly where one system fails. **P2**
 
-**H12 — Guideline ↔ model co-refinement loop** (formalizes the existing guideline-refinement practice). State (G_k, TC_k).
+**H12 — Guideline ↔ model co-refinement loop** (formalizes the existing guideline-refinement practice, in which the guideline is a DSPy program optimized with GEPA; G₀ is that optimized guideline and the GEPA optimizer can serve as the edit-proposal mechanism in Step A). State (G_k, TC_k).
 Step A (LLM side): run S_LLM(G_k) on dev₁; an LLM critic proposes guideline edits (added decision rules, examples,
 clarified boundaries) from the FN/FP list; edits are accepted by a human (or automatically, as an ablation) → G_{k+1};
 overfitting guard: improvement must replicate on dev₂ before acceptance. Step B (TC side): categorize TC_k errors on dev₁;
@@ -461,7 +461,7 @@ files in git; prior artifacts imported after the skeleton (Appendix A); serializ
 2. LLM aliases: `llm-strong` and `llm-fast` model choices — recommended one frontier model and one cheap model from
    different providers, pinned by dated identifiers in `configs/litellm.models.yaml`.
 3. Human annotation budget for H11/H12 — recommended ≥ 100 notes adjudicated (or none: simulate with gold).
-4. Repository license — recommended Apache-2.0 (matches OPF/OpenMed).
+4. Repository license — recommended Apache-2.0 (matches OPF/OpenMed). **The repository is now public and has no LICENSE file, which means all rights reserved by default; this needs a decision before anyone reuses the code.**
 5. Which prior artifacts exist and in what format (guideline version, annotation format, TC checkpoint) — Appendix A.
 6. Target venue and timeline.
 
@@ -471,7 +471,7 @@ files in git; prior artifacts imported after the skeleton (Appendix A); serializ
 
 | Artifact | Destination | Needed from the user | Used by |
 |---|---|---|---|
-| Annotation guideline (current version) | `prompts/guideline_v0.md` | text | S_LLM baseline, H12 G₀, H9 labeler |
+| Annotation guideline (current version) | `prompts/guideline_v0.md` (+ the DSPy program / GEPA run config that produced it) | text, DSPy program, GEPA config | S_LLM baseline, H12 G₀, H9 labeler |
 | LLM prompt(s) and output parser | `prompts/`, `src/note_deid/llm/` | prompt text, model id, parsing rules | H15 format F1 |
 | Annotated notes | `data/annotations/` (gitignored) + converter to `Doc` JSONL | format (brat / XML / JSON), label set | dev₁/dev₂, adjudication, E3 learning curves if enough |
 | TC training config / checkpoint | `configs/train/`, `models/` (gitignored) | base model, hyperparameters | S_TC baseline |
