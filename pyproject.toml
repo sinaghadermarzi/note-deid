@@ -27,6 +27,8 @@ finetune = [
   "accelerate>=1.0",
   "datasets>=2.20",
   "seqeval>=1.2.2",
+  "sentencepiece>=0.2",
+  "protobuf>=4",
 ]
 # Benchmark construction (synphi) and analysis
 data = [
