@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- project-specific ---
+data/*
+!data/README.md
+results/*
+!results/README.md
+models/
+third_party/
+.cache/
+.venv/
+.env
