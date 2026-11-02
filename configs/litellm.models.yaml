@@ -12,6 +12,10 @@ model_list:
     litellm_params:
       model: anthropic/claude-sonnet-5
       temperature: 0
+  - model_name: llm-cheap             # Haiku-class model for the D3 segment gate and the D7 over-generating proposer
+    litellm_params:                   # (framework-designs.md section 3.6, Appendix D); placeholder identifier, see above
+      model: anthropic/claude-haiku-5-5
+      temperature: 0
   - model_name: llm-strong-alt        # second provider for cross-model checks
     litellm_params:
       model: anthropic/claude-opus-5

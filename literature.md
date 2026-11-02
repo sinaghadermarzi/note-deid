@@ -211,12 +211,15 @@ grounding failures before hybrids are evaluated.
   (2022) (K): P(True) from a yes/no continuation is reasonably calibrated for base models; Tian et al. *Just ask for
   calibration.* EMNLP 2023 (K): for RLHF-tuned models verbalized confidences can beat raw token probabilities, and both need
   post-hoc scaling. Grounds the log-probability scoring design (D4) and its dev-set calibration step.
-- **Palacios 2026** (V, §3): LLM self-verification of LLM output added nothing because errors are correlated across runs;
-  family D keeps the *proposer* and the *judge* heterogeneous (rules / TC / cheap model vs strong model) for that reason.
+- **Palacios 2026** (V, §3): LLM self-verification *and* cross-model two-pass pipelines (Sonnet scrubber → Opus auditor)
+  added nothing because errors are correlated across runs and models; the structural-heterogeneity argument for family D
+  therefore applies to the rule and TC proposers (a)–(b), not to an LLM proposer. D7 is the design closest to that null and
+  is run as its replication under the one condition Palacios did not vary — a recall-maximizing proposer instruction.
 
-**Relevance.** Candidate classification is an established alternative to sequence labelling and generative extraction,
-but for de-identification nobody has measured candidate coverage, decision quality and per-note cost together, nor
-compared decision-style prompting with extraction prompting at matched cost — the content of RQ9 / E9.
+**Relevance.** Candidate classification is an established alternative to sequence labelling and generative extraction.
+Among the de-identification studies collected here (including the 2024 Artif Intell Med systematic review of §1 and the
+EMNLP 2025 LLM survey of §3) we found none that measures candidate coverage, decision quality and per-note cost together,
+or compares decision-style prompting with extraction prompting at matched cost — the content of RQ9 / E9.
 
 ---
 
@@ -340,8 +343,8 @@ commercial LLM APIs may be used for all data in scope of this project (currently
    currently unreachable. The 2026 surrogate-equivalence result licenses a PHI-injection benchmark built from PHI-free notes.
 6. **Surrogation with hybrid detection** has no leakage/consistency/utility evaluation; LLM surrogates are untested at scale.
 7. **Decision-style prompting is untested for de-identification.** Span classification and post-hoc verification are
-   established for NER (SpanNER, GPT-NER), but no de-id study asks the LLM to *judge explicit candidates* instead of
-   enumerating spans, measures the candidate-coverage ceiling that this introduces, calibrates the verdicts, or compares
-   the designs with extraction prompting at matched cost (§5b).
+   established for NER (SpanNER, GPT-NER), but among the de-id studies reviewed here we found none that asks the LLM to
+   *judge explicit candidates* instead of enumerating spans, measures the candidate-coverage ceiling that this introduces,
+   calibrates the verdicts, or compares the designs with extraction prompting at matched cost (§5b).
 
 These seven gaps map onto the research questions RQ1–RQ9 in `framework-designs.md`.
