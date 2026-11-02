@@ -191,6 +191,33 @@ format-induced. The framework therefore includes an output-format ablation (inli
 constrained decoding for local models, fuzzy alignment) so that "LLM misses" can be decomposed into semantic misses and
 grounding failures before hybrids are evaluated.
 
+### 5b. Decision-style NER: candidate classification, verification, and LLM-as-judge
+
+- **MRC-NER** — Li, Feng, Meng, Han, Wu, Li. *A unified MRC framework for named entity recognition.* ACL 2020 (K). NER as
+  question answering: the entity type is a natural-language query and the model answers with spans. Precursor of
+  label-definition-conditioned decisions (the D5 cross-encoder takes the label definition as input).
+- **SpanNER** — Fu, Huang, Liu. *SpanNER: named entity re-/recognition as span prediction.* ACL 2021 (K). Enumerate
+  candidate spans, classify each; span prediction complements sequence labelling and works as a *system combiner* over
+  other NER outputs — the structural template of family D (propose, then decide) and of its union with the TC.
+- **GPT-NER self-verification** — Wang et al. 2023 (K, see above): a per-entity yes/no question after extraction cuts
+  false positives; the ancestor of the per-candidate decision call (D1) and of the H3 verifier.
+- **LLM-as-a-judge** — Zheng et al. *Judging LLM-as-a-judge with MT-Bench and Chatbot Arena.* NeurIPS 2023 (K).
+  Documents position and verbosity biases of LLM judges; relevant to batched verdict lists (D2), where the order and number
+  of candidates may shift decisions.
+- **Lost in the middle** — Liu, Lin, Hewitt, Paranjape, Bevilacqua, Petroni, Liang. TACL 2024 (K). Performance degrades for
+  information in the middle of long contexts; the attention-dilution risk of marking 100+ candidates in one call (D2) and
+  the reason D3/F4-style segmentation is kept as a fallback.
+- **Calibration of verbalized answers** — Kadavath et al. *Language models (mostly) know what they know.* arXiv:2207.05221
+  (2022) (K): P(True) from a yes/no continuation is reasonably calibrated for base models; Tian et al. *Just ask for
+  calibration.* EMNLP 2023 (K): for RLHF-tuned models verbalized confidences can beat raw token probabilities, and both need
+  post-hoc scaling. Grounds the log-probability scoring design (D4) and its dev-set calibration step.
+- **Palacios 2026** (V, §3): LLM self-verification of LLM output added nothing because errors are correlated across runs;
+  family D keeps the *proposer* and the *judge* heterogeneous (rules / TC / cheap model vs strong model) for that reason.
+
+**Relevance.** Candidate classification is an established alternative to sequence labelling and generative extraction,
+but for de-identification nobody has measured candidate coverage, decision quality and per-note cost together, nor
+compared decision-style prompting with extraction prompting at matched cost — the content of RQ9 / E9.
+
 ---
 
 ## 6. Annotation-guideline refinement and prompt optimization
@@ -261,6 +288,12 @@ methodological template (paired spans, TOST) for our surrogation experiments and
   *The hitchhiker's guide to testing statistical significance in NLP*, ACL 2018) (K); TOST equivalence testing (V, from
   arXiv:2608.03172); repeated runs to expose LLM non-determinism (Palacios report ±0.001–0.002 F1 over 5 trials) (V).
 - **Cost**: tokens and dollars per 1k notes and latency; ensembles cost 3–6× single-pass (V, Palacios).
+- **Provider pricing mechanics** (S; Anthropic pricing and prompt-caching pages as reflected in the bundled API reference
+  read 2026-11-02 — re-check the live pages before quoting): prompt-cache reads cost ≈ 0.1 × the input price (lower on
+  the newest top-tier models), cache writes 1.25 × (5-minute TTL) or 2 × (1-hour TTL), the minimum cacheable prefix is
+  512–1,024 tokens on current models, the batch API halves every token price, and cache reads do not count toward
+  input-token rate limits. These mechanics decide whether per-candidate decision designs are affordable
+  (`framework-designs.md` §3.6, Appendix D).
 
 ---
 
@@ -306,5 +339,9 @@ commercial LLM APIs may be used for all data in scope of this project (currently
 5. **No reproducible open benchmark with controllable label frequencies exists**, and the standard gated benchmark is
    currently unreachable. The 2026 surrogate-equivalence result licenses a PHI-injection benchmark built from PHI-free notes.
 6. **Surrogation with hybrid detection** has no leakage/consistency/utility evaluation; LLM surrogates are untested at scale.
+7. **Decision-style prompting is untested for de-identification.** Span classification and post-hoc verification are
+   established for NER (SpanNER, GPT-NER), but no de-id study asks the LLM to *judge explicit candidates* instead of
+   enumerating spans, measures the candidate-coverage ceiling that this introduces, calibrates the verdicts, or compares
+   the designs with extraction prompting at matched cost (§5b).
 
-These six gaps map one-to-one onto the research questions RQ1–RQ8 in `framework-designs.md`.
+These seven gaps map onto the research questions RQ1–RQ9 in `framework-designs.md`.

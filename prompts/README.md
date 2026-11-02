@@ -5,7 +5,9 @@ Drop the existing annotation guideline here as `guideline_v0.md` (see framework-
 - `guideline_v0.md` — current guideline (imported); later versions produced by the H12 refinement loop as `guideline_v<k>.md`
 - `extract_f1_json.md`, `extract_f2_anchored.md`, `extract_f3_inline.md`, `extract_f4_segments.md` — output-format variants (H15)
 - `editor_h5.md` — review-and-edit prompt over TC-pretagged text
-- `verify_h3.md` — span verification prompt
+- `verify_h3.md` — span verification prompt (also the per-candidate decision prompt of D1/D4)
+- `decide_d2_batched.md` — batched verdicts over numbered candidate markers (D2; D2p/D2b/D6 output variants)
+- `gate_d3_segments.md` — segment-level PHI gate (D3)
 - `inject_contextual.md` — synphi contextual insertion prompt
 
 Every prompt file is hashed and the hash is stored with each run.

@@ -12,7 +12,7 @@ tested offline. No paper experiments have been run yet: they need the prior guid
 
 | Document | Content |
 |---|---|
-| [`framework-designs.md`](framework-designs.md) | failure-mode analysis, hybrid design space H1–H16 / S1–S3, research questions RQ1–RQ8, evaluation protocol, benchmark plan, backends, roadmap, decision log |
+| [`framework-designs.md`](framework-designs.md) | failure-mode analysis, hybrid design space H1–H16 / D0–D7 (decision-model detection) / S1–S3, research questions RQ1–RQ9, evaluation protocol, benchmark plan, backends, roadmap, decision log, per-note cost model (Appendix D) |
 | [`literature.md`](literature.md) | citation-keyed literature review and gap analysis |
 | [`docs/datasets.md`](docs/datasets.md) | dataset access status (2026-09) and the `synphi` PHI-injection benchmark spec |
 
@@ -27,6 +27,7 @@ src/note_deid/
   hybrid/              fusion policies H1 union, H2 label-routed, H3 confidence-gated; H7 routing features
   tc/                  span<->tag encoding with chunking, decoding with scores, TCDetector, Trainer script
   llm/                 LiteLLM client (cache, cost log, concurrency 1), formats F1-F4 + editor + verifier, parsers,
+                       costmodel (closed-form per-note token/cost estimates for F1/F3/H5 and the decision designs D1-D7),
                        aligners, LLMDetector
   data/                cleaning, MTSamples/Asclepius loaders, PHI generators + templates + injector, synphi builder,
                        demo notes

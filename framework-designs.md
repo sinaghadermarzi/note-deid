@@ -1,6 +1,6 @@
 # Framework designs: hybrid LLM + token-classifier de-identification of clinical notes
 
-Status: **draft for design review** (2026-09-14). Items marked ▶ are decisions still open; each carries a recommended
+Status: **draft for design review** (2026-09-14; §3.6 decision-model family and Appendix D added 2026-11-02). Items marked ▶ are decisions still open; each carries a recommended
 default. Everything else is proposed as the working design. Literature references are keyed to `literature.md`.
 
 ---
@@ -16,7 +16,10 @@ both single systems under a recall-first protocol, (3) do this across a controll
 release a reproducible PHI-injection benchmark with controllable label frequencies so the rare-label regime can be studied
 even while gated corpora are unavailable. The paper's claim is not "ensembles help" (homogeneous LLM ensembles do not:
 Palacios 2026) but that **heterogeneous systems with structurally different failure modes can be combined by routing on the
-structure of those failures**, and that the LLM can *manufacture* the training signal the TC lacks.
+structure of those failures**, and that the LLM can *manufacture* the training signal the TC lacks. A fourth axis,
+decision-model detection (family D, §3.6), asks whether the LLM should *judge explicit candidates* instead of
+*enumerating spans*: that removes grounding failures by construction and bounds the output, at the price of a
+candidate-coverage ceiling and a cost profile that Appendix D compares design by design.
 
 ---
 
@@ -249,7 +252,141 @@ attacker precision on the residual leaks, cf. Carrell 2013/2020), mapping-consis
 detector re-run equivalence (TC recall on surrogated vs original within ±2 points, TOST), utility (downstream note-type
 classification and clinical-concept NER drift; readability). **P2** (design now, run in phase P4).
 
-### 3.6 Summary matrix
+### 3.6 Decision-model detection (family D: the LLM judges candidates instead of enumerating spans)
+
+S_LLM in §1.2 is an *extraction* model: it reads the note and enumerates PHI spans (formats F1–F4). A **decision model**
+answers a closed question about a unit it is handed — *is this candidate PHI, and which label?* — so the generative part of
+the task shrinks to a verdict, offsets are known by construction (the candidate carries them), and output length is
+bounded by the number of candidates rather than by the note. The H3 verifier (Appendix B) is already a decision model,
+applied only to disputed candidates; the H5 editor is a decision model in disguise (a verdict per pre-tagged span plus
+additions) that pays for its verdicts by re-emitting the whole note. Family D makes the decision model the primary LLM
+role. In the project's earlier notes this is "model 1 (decision)", as opposed to the extraction model.
+
+**Why it may fix what extraction cannot.** The LLM failures of §1.3 split into (i) *omission* — the model never emits a
+span that is in the text — and (ii) *grounding* — it emits a non-verbatim string or an ambiguous repeat. Decision
+prompting removes (ii) entirely and turns (i) from recall-from-memory (enumerate everything you noticed) into recognition
+(answer for each marked item) — the argument behind H5, now with a bounded output. The price is a new failure mode,
+**candidate miss**: a gold mention that no proposer offers can never be recovered. Every design below is therefore judged
+on three numbers — candidate coverage R_C (fraction of gold spans with a matching candidate, strict and relaxed), decision
+quality (precision/recall over candidates), and cost per note — and end-to-end misses decompose as candidate misses +
+decision misses + boundary mismatches, extending the RQ8 decomposition.
+
+**Design axes.**
+
+- *Unit of decision*: candidate span · distinct string (entity) · segment/sentence · token.
+- *Candidate proposer*: (a) **surface-form** — regex shapes (dates, phones, fax, emails, URLs, IPs, SSN/ID shapes, ZIPs,
+  ages), capitalized token runs not at sentence start, titled names (Dr./Mr./Ms.), digit runs, values on header lines
+  (`HEADER_LINE` in `hybrid/routing.py`); recall-maximizing, ≈ 60–100 candidates per 1k-token note; (b) **TC-based** — TC
+  spans plus uncovered regex cues (`RARE_CUE_PATTERNS`) plus low-confidence tokens, ≈ 30; (c) **zero-shot span model**
+  (GLiNER, H16); (d) **cheap LLM over-generation** (an extraction pass told to list anything that could be PHI); (e) the
+  union of (a)–(d). Coverage is measured per proposer before any decision design runs (D0).
+- *Decision function*: strong LLM with JSON verdicts · LLM with a one-token answer scored by log-probabilities
+  (calibrated) · distilled encoder over the marked context · local model with prefix caching.
+- *Context*: ±200-character snippet vs the whole note (document-level cues: a bare first name is PHI because the full name
+  is in the header; letterheads; signature blocks).
+- *Batching*: one call per candidate · one call per note · one call per flagged segment.
+
+**D0 — Candidate-coverage analysis (no LLM).** For each proposer (a)–(e): R_C strict/relaxed per label and per frequency
+bucket against gold on dev, and the candidate-to-gold ratio (the noise a decision model must absorb). Fixes the recall
+ceiling of every D design and the K that drives their cost. Requires: a proposer module (`llm/candidates.py`, planned)
+sharing its regexes with H7. Expected: relaxed R_C ≥ 0.98 for the union proposer at K ≈ 80–120; strict R_C lower on
+multi-token names and suffixed dates unless candidates are maximal runs; gaps concentrate in lowercase names, PROFESSION,
+LOCATION-OTHER and HOSPITAL abbreviations. **P1** (cheap; prerequisite for the family)
+
+**D1 — One decision call per candidate (the H3 verifier generalized).** For every candidate: system = guideline + verdict
+instruction (a cacheable prefix), user = snippet with the candidate bracketed → `{"is_phi": bool, "label": ...}`.
+Targets: omission and grounding; isolates the decision function for calibration studies. Requires: the existing
+`build_verifier_messages`. Cost: K calls per note; with the guideline served from the prompt cache each call is
+≈ 0.1 G + 130 input-price-equivalent tokens (K × G without caching) — ≈ 10 × F1 and ≈ 80 requests per note, i.e. about
+26 h per 1k notes at concurrency 1 (Appendix D). Risks: the snippet loses document-level cues; per-request rate limits
+dominate; cache entries expire when calls are spaced more than 5 min apart. Expected: the most accurate single-candidate
+verdict (no attention dilution) but unaffordable as a primary detector; its roles are the reference decision function
+and the H3 verifier. **P2**
+
+**D2 — Batched decisions over marked candidates (one call per note).** Numbered markers are inserted around every
+candidate (`⟦12|03/04/2019⟧`), the guideline stays the system prompt, and the model returns one verdict per index:
+`{"decisions": [{"i": 12, "phi": true, "label": "DATE"}, ...]}`; offsets come from the marker table, never from the
+output. Variants: **D2p** positives-only output (`12:DATE` per line) — the cheapest, but it re-admits omission because an
+unmentioned candidate silently defaults to "not PHI" (measure the gap to D2); **D2b** verdicts plus a free-text
+`"additions"` list for PHI no marker covers (an enumeration channel for the residual, aligned like F1) — closes the
+candidate ceiling at small cost; **boundary edits** — a verdict may grow or trim a candidate by whole tokens
+(`"extend": [1, 0]`) so maximal-run candidates can be corrected. Targets: omission (a recognition task over every
+candidate), grounding (by construction), H5's output cost (verdicts instead of the full note). Requires: proposer, marker
+renderer and parser; a `decision` detector type in the runner. Cost: one call; input = note + ≈ 6 tokens per marker;
+output ≈ 10 tokens per candidate (D2) or ≈ 5 per positive (D2p) → ≈ 2.1 × F1 (D2) and ≈ 0.8 × F1 (D2p) at the default
+workload; ≈ 4 h per 1k notes at concurrency 1. Risks: marker clutter on long notes (sweep K; drop rule-negative candidates
+such as section headers and lexicon drug names); attention dilution above K ≈ 150 (segment as in F4); verdict-list
+drift — missing or duplicated indices are counted as parse failures. Expected: recall ≥ F3 at 0.8–2.1 × F1 cost; the
+structured-output form of H5 and the **primary design of the family**. **P1**
+
+**D3 — Segment gate, then decisions on flagged segments (two-stage decision cascade).** Stage 1 decides per segment
+(line / paragraph / sentence) whether it contains PHI and which labels: a cheap LLM over the numbered segments (short
+system prompt; output = flagged indices) or, **D3c**, a small sentence classifier trained on silver verdicts. Stage 2 runs
+D2 over the flagged segments only (φ ≈ 0.3–0.5 of the text where PHI concentrates in headers, signature blocks and a few
+sentences). Targets: strong-model cost; routing by content rather than by TC uncertainty (complements H7 and works with
+no TC at all). Requires: `segment_text`; gate prompt or classifier. Cost: ≈ 0.9 × F1 with the gate on the fast alias.
+Risks: a gate miss is a silent miss (report recall on unflagged segments, as for H7); φ is corpus-dependent — on dense
+notes the gate saves nothing. Expected: a recall–cost curve over the gate threshold that dominates H7 when TC uncertainty
+is uninformative. **P2**
+
+**D4 — Token-level decision by log-probability scoring (calibrated decision model).** The D1 prompt, but the answer is a
+single token (`yes`/`no`, or a label letter) and the decision score is its log-probability; the threshold is set on dev
+for a target recall (the recall-first protocol) instead of trusting a sampled verdict. API variant: needs `logprobs`
+(OpenAI-compatible endpoints, local vLLM; not exposed by the Anthropic API) and costs like D1 with one output token.
+Local variant: with prefix caching the note is prefilled once and each candidate is a short continuation, so the cost is
+GPU-seconds (≈ G + N + 40 K prefill tokens per note) rather than USD — the natural deployment of the family on the A100
+node (`llm-local`). Targets: calibration (ECE, risk–coverage curves); recall-first thresholding; a score that H3's
+`verify` and H4's features can consume. Requires: `logprobs` support in `LLMClient`; a local model. Risks: verbalized
+yes/no probabilities of instruction-tuned models are over-confident (temperature scaling or isotonic regression on dev);
+answer ordering (label-first vs yes/no-first) changes the scores. Expected: a tunable recall–precision curve where D1/D2
+give a single point. **P2**
+
+**D5 — Distilled decision classifier (cross-encoder).** Train a small encoder (DeBERTa-v3-base) on D2 verdicts over the
+silver pool (H9's unlabeled notes): input = snippet with the candidate marked plus the label *definition* text, output =
+label or none. Because the definition is an input, a new label needs new text plus a handful of silver verdicts
+(GLiNER-style extensibility) rather than a new head (H13). Targets: inference cost of the whole family (≈ 0 USD,
+milliseconds per note); the no-data regime (silver verdicts are cheaper and more precise than silver spans because the
+candidate is fixed). Requires: proposer; one D2 pass over the pool (one-off ≈ D2 cost × pool size); GPU. Risks: inherits
+D2's omissions on the pool (iterate through D2b); a proposer change is a distribution shift. Expected: the decision
+analogue of H9 — matches D2 on frequent labels, trails on the tail until silver verdicts cover it. **P3** (P2 if H9 proves
+out)
+
+**D6 — Entity-level decisions (one verdict per distinct string).** Group candidate occurrences by normalized string
+(case, whitespace, punctuation; name variants by the name parsing of S1), render every occurrence with its group index,
+and ask for one verdict per group with an explicit exception channel (`"except": [occurrence indices]`) for strings whose
+role varies by context (`May` the month vs the name; `Jordan` the country vs the person). Targets: the "omitted repeated
+mention" failure directly (one decision propagates to every occurrence); output cost by the repetition factor
+(≈ 1.6 → 1.56 × F1 vs 2.12 × for D2). Requires: D2 plus grouping. Risks: wrong propagation on role-ambiguous strings
+(measure exception usage and errors); group-index clutter. Expected: no recall loss vs D2 at ≈ 27 % lower cost (37 % fewer output tokens); the
+operational form of D2. **P1** (as a D2 variant)
+
+**D7 — Over-generate, then decide (two-model cascade).** A cheap model (or GLiNER, H16) runs an extraction pass with a
+recall-maximizing instruction ("list anything that could be PHI; precision does not matter"), producing K' ≈ 1.5 P
+candidates; the strong model runs D2 over them. Targets: K (the strong model reads ≈ 30 markers instead of 80), and the
+precision role that Palacios found LLM self-verification cannot fill — here proposer and judge differ in model and in
+instruction, so the judge's job is precision over an intentionally noisy set. Requires: two aliases; the proposer's R_C
+from D0. Cost: ≈ 1.1 × F1. Risks: the proposer's omissions are unrecoverable (the ceiling is the cheap model's recall;
+a union with the surface-form proposer restores it at higher K); correlated errors when proposer and judge share a
+provider. Expected: the best cost–recall point when a surface-form proposer is too noisy for the note type
+(narrative-heavy notes with many capitalized clinical terms). **P2**
+
+**Relationship to the hybrids.** D2/D6 are drop-in replacements for the LLM in H1–H4 (a verdict set is a span set with
+scores) and for the editor in H5; proposer (b) turns D2 into "TC-first, LLM decides" — the cascade H5 reaches for, with a
+bounded output; D4 scores feed H3's verifier and H4's features; D3's gate is an alternative router to H7. **What the
+family cannot do**: it does not help where the proposer has no candidate — lowercase or unusual-script names, free-text
+PROFESSION, HOSPITAL abbreviations, LOCATION-OTHER — exactly the rows where the extraction LLM is strong (§1.3). D2b's
+additions channel and a union with a cheap extraction run are the mitigations; E9 measures whether the residual is worth
+them.
+
+**Cost comparison.** Appendix D gives the closed-form per-note token and cost model (`note_deid.llm.costmodel`) for
+F1/F3/H5 and D1–D7 under stated assumptions (1k-token note, 1.5k-token guideline, 20 PHI mentions, 80 candidates). At the
+default workload and the Sonnet-5 price point: D1 ≈ 10 × F1 (≈ 34 × an uncached F1 run when nothing is cached, and 80
+requests per note), D2 ≈ 2.1 ×, D6 ≈ 1.6 ×, D7 ≈ 1.1 ×, D3 ≈ 0.9 ×, D2p ≈ 0.8 ×; F3 and H5 sit at ≈ 2.8 × because they re-emit the
+note. Output tokens, not input, decide the ranking among the one-call designs, which is why the verdict format (verbose
+vs positives-only vs entity-grouped) is itself an experimental variable. The ratios are stable from 1k- to 3k-token notes
+because every term scales with N or K; the absolute numbers scale linearly.
+
+### 3.7 Summary matrix
 
 | ID | Family | Targets (failure rows of §1.3) | Human labels needed | LLM calls / note | Priority |
 |---|---|---|---|---|---|
@@ -269,6 +406,14 @@ classification and clinical-concept NER drift; readability). **P2** (design now,
 | H14 Hint-conditioned TC | representation | trust calibration | silver | 1 | P3 |
 | H15 Format ablation | grounding | LLM grounding | none | 1 | P1 |
 | H16 Zero-shot span model | third component | unsupported labels, gating | none | 0 | P3 |
+| D0 Candidate coverage | decision | (analysis: recall ceiling of D) | none | 0 | P1 |
+| D1 Per-candidate verdicts | decision | omission, grounding | none | K (≈ 80, short) | P2 |
+| D2 Batched verdicts (+D2p/D2b) | decision | omission, grounding, H5 output cost | none | 1 (bounded output) | P1 |
+| D3 Segment gate → D2 | decision cascade | cost, routing without a TC | none (D3c: silver) | 1 cheap + 1 partial | P2 |
+| D4 Logprob scoring | decision | calibration, recall-first thresholds | small dev | K (local: GPU-s) | P2 |
+| D5 Distilled decision classifier | decision / training | inference cost, no-data regime | none (silver verdicts) | 0 (one-off D2 pass) | P3 |
+| D6 Entity-level verdicts | decision | repeated-mention omissions, output cost | none | 1 | P1 |
+| D7 Over-generate → decide | decision cascade | K, precision over a noisy proposer | none | 1 cheap + 1 | P2 |
 | S1–S3 Surrogation | surrogation | leakage / utility | none | 0–1 | P2 |
 
 ---
@@ -285,6 +430,7 @@ classification and clinical-concept NER drift; readability). **P2** (design now,
 | **RQ6** Do results transfer across sources, note types and institutions? | Hybrid gains persist (or grow) under shift; TC alone degrades most | **E6**: train on MTSamples-injected → test on Asclepius-injected (and reverse); held-out note types; unseen institution lexicon; transfer to i2b2 2014 when access reopens | Δ across sources per system; institutional-label recall |
 | **RQ7** Does hybrid surrogation reduce leakage while preserving utility? | S3 ≥ S1 on realism and consistency with equal leakage; detector re-run equivalent within ±2 pts | **E7**: S1–S3 on hybrid-detected spans; attacker test; downstream tasks | leakage; attacker precision; consistency; TOST; utility drift |
 | **RQ8** How much of the LLM miss rate is format-induced? | F3/F4 cut alignment failures to near zero and reduce total misses by a third; semantic omissions remain | **E8**: H15 formats F1–F4 (F5 optional), same model, same guideline, 3 runs | parse-failure rate; alignment-failure rate; recall decomposition; output tokens |
+| **RQ9** Does decision-style prompting over explicit candidates remove the LLM's omission and grounding failures, and at what cost? | Union proposer relaxed R_C ≥ 0.98; D2 recall ≥ F3 recall with zero alignment failures at ≤ 2.1 × F1 cost (D2p ≤ 0.8 ×); D6 = D2 in recall at lower cost; D1 ≈ D2 in decision quality at ≥ 4 × cost and 80 × the requests; D4 scores calibrate (ECE < 0.05 after scaling) and trace a recall–precision curve that dominates fixed verdicts; D7 ≈ D2 only where the cheap proposer's R_C ≥ 0.97 | **E9**: D0 for proposers (a)–(e); D1 on a 200-note dev subset; D2 / D2p / D2b / D6 / D7 on dev, 3 runs; D3 (fast gate) and D3c threshold sweeps; D4 on `llm-local`; same guideline and strong model as E8; costs from the per-call log and Appendix D | R_C per label / bucket; decision P/R over candidates; end-to-end recall decomposition (candidate miss / decision miss / boundary); calibration (ECE, risk–coverage); $/1k notes, calls/note, hours at concurrency 1 |
 
 Pre-specification: thresholds and prompts are frozen on dev before test evaluation; every configuration is a versioned YAML
 under `configs/experiments/`; prompt text is hashed and logged with each run.
@@ -306,8 +452,10 @@ under `configs/experiments/`; prompt text is hashed and logged with each run.
 5. **Gold adjudication**: LLM-only spans that survive review are candidates for gold gaps (Palacios: 414 → confirmed PHI).
    Protocol: a human reviews a stratified sample of LLM-only spans; confirmed gaps are added to a *v1.1 gold*; results are
    reported on both gold versions.
-6. **Cost**: per call — model, prompt hash, input/output tokens, USD (LiteLLM `completion_cost`), latency; per configuration —
-   $/1k notes.
+6. **Cost**: per call — model, prompt hash, input/output tokens, cache-read tokens, USD (LiteLLM `completion_cost`),
+   latency; per configuration — $/1k notes, calls per note, and wall-clock at concurrency 1 (requests, not tokens,
+   bound the per-candidate designs of §3.6). Closed-form planning estimates come from `note_deid.llm.costmodel`
+   (Appendix D) and are replaced by logged counts once a configuration has run.
 7. **Reporting checklist**: model identifiers and dates, prompt hash, temperature, seeds, benchmark version, split hashes,
    thresholds, hardware. (The EMNLP 2025 survey's main complaint is inconsistent reporting.)
 
@@ -386,7 +534,16 @@ splits, seeds. Runs write `results/<exp>/<run-id>/{predictions.jsonl, metrics.js
 - JSON-schema `response_format` where the provider supports it; otherwise instructed JSON + tolerant parsing.
 - Disk cache keyed by (model, params, prompt hash, text hash) — reruns are free; cost tracking via `completion_cost`.
 - Retries with backoff; **request concurrency defaults to 1** (rate-limit friendly), configurable per run.
-- Prompt templates under `prompts/` (guideline versions, format variants F1–F4, editor prompt, verifier prompt).
+- Prompt templates under `prompts/` (guideline versions, format variants F1–F4, editor prompt, verifier prompt, and the
+  family-D decision prompts: per-candidate verdict, batched verdicts over markers, segment gate).
+- **Prompt caching**: the guideline + instructions are the stable system prefix (hash-stable rendering, no per-call
+  text before it) so that every provider that caches prefixes serves it at the cache-read price; `LLMCall` is to gain a
+  `cache_read_tokens` field, because the per-candidate designs (D1/D4) are only affordable when the prefix is cached
+  and the cost log must show that it was. Cache reads also do not count toward input-token rate limits on the
+  Anthropic API, which matters at concurrency 1.
+- **Log-probabilities** (D4) are only available on OpenAI-compatible endpoints and the local vLLM server (`llm-local`);
+  the client exposes them as an optional `logprobs` request parameter and leaves the score `None` elsewhere.
+- `note_deid.llm.costmodel`: closed-form per-note token/cost estimates for F1/F3/H5 and D1–D7 (Appendix D).
 
 ### 7.3 Token-classification backend (HF Transformers + OPF)
 
@@ -424,8 +581,8 @@ and a `results/` layout that stores predictions so every metric can be recompute
 |---|---|---|
 | **P0 (this session)** | `literature.md`, `framework-designs.md`, `docs/datasets.md`, skeleton, schema/labels | — |
 | **P1 — foundation** | `synphi-v0.1` (≈ 2k notes, `i2b2like` + `decoupled` profiles); evaluator + tests; port of S_LLM (from prior code) with formats F1–F4; S_TC training on OPF and DeBERTa; **E1 + E8** → complementarity report (the paper's Figure 1) | prior artifacts imported; API keys; A100 or Mac for TC |
-| **P2 — inference-time hybrids** | H1, H2, H3, H5, H7, H8 → **E2, E5** | P1 |
-| **P3 — training-time hybrids** | H9, H10, H13 (+ H11, H12 if budget) → **E3, E4** | P1, A100 sweeps |
+| **P2 — inference-time hybrids** | H1, H2, H3, H5, H7, H8 → **E2, E5**; D0, D2 (+D2p/D2b), D6, D7, then D1/D3/D4 → **E9** | P1 |
+| **P3 — training-time hybrids** | H9, H10, H13 (+ H11, H12, D5 if budget) → **E3, E4** | P1, A100 sweeps |
 | **P4 — surrogation** | S1–S3 → **E7** | P2 |
 | **P5 — robustness & paper** | E6 (cross-source, note type, institutional; i2b2 transfer if access), gold adjudication, ablations, writing | P2–P4 |
 
@@ -440,14 +597,15 @@ and dev-subset tuning the paid volume should stay well below that; all LLM runs 
   label scarcity.*
 - **Contributions**: (1) first quantitative error-complementarity analysis between LLM and trained token classifiers for
   de-identification, per label and per training frequency; (2) a taxonomy and evaluation of hybrid designs (fusion,
-  cascade, training-time coupling, grounding); (3) results across human-label budgets, including the zero-label regime;
+  cascade, training-time coupling, grounding, and decision-style prompting over explicit candidates); (3) results across human-label budgets, including the zero-label regime;
   (4) a reproducible PHI-injection benchmark with controllable label frequencies; (5) cost–recall frontiers for deployment;
   (6) surrogation with hybrid detection (if P4 completes).
 - **Positioning**: vs Palacios 2026 (homogeneous LLM ensembles fail; ours are heterogeneous and routed), SHIELD (distillation
   baseline; we address its rare-category gap), locally augmented ensembles (no LLM), JSL LLM-in-the-loop (closed data).
 - **Venues** ▶ (recommended: JAMIA or JBI for the full study; ML4H / CHIL / clinical-NLP workshop for an early version).
 - **Figures**: F1 FN-set overlap + label × system miss heatmap; F2 recall–precision Pareto of hybrids; F3 learning curves;
-  F4 rare-label recall vs training count; F5 recall–cost frontier; tables per subtype.
+  F4 rare-label recall vs training count; F5 recall–cost frontier; F6 extraction vs decision designs: recall decomposition
+  (candidate / decision / boundary / alignment misses) against $/1k notes; tables per subtype.
 - **Threats to validity**: synthetic-injection realism; LLM version drift (mitigated by pinned model ids, dates, cached
   outputs); gold gaps; English only; single taxonomy.
 
@@ -472,6 +630,13 @@ must be synthetic, and released checkpoints are trained only on data whose terms
 3. Human annotation budget for H11/H12 — recommended ≥ 100 notes adjudicated (or none: simulate with gold).
 4. Which prior artifacts exist and in what format (guideline version, annotation format, TC checkpoint) — Appendix A.
 5. Target venue and timeline.
+6. Candidate proposer for the decision-model family (§3.6) — recommended **union of surface-form regex/capitalization
+   rules and TC spans** (proposer (e) without the LLM member), with D0 coverage reported per label before any D run.
+7. Verdict output format for D2 — recommended **verbose (one verdict per candidate)** as the primary condition, with
+   positives-only (D2p) and entity-grouped (D6) as the cost arms; positives-only becomes the default only if E9 shows no
+   recall gap.
+8. Where D4 (log-probability scoring) runs — recommended **local vLLM only** (`llm-local`), since the commercial aliases
+   in `configs/litellm.models.yaml` either do not expose log-probabilities or make per-candidate calls cost ≈ 10 × F1.
 
 ---
 
@@ -496,6 +661,14 @@ must be synthetic, and released checkpoints are trained only on data whose terms
 - **Editor (H5)**: input = note pre-tagged by the TC; instructions = add / remove / retype; output as F3 or as an edit list
   `{"add": [...], "remove": [...], "retype": [...]}` keyed by occurrence index.
 - **Verifier (H3)**: input = candidate span with ±200 characters, label definition; output `{"is_phi": bool, "label": ...}`.
+- **Decision, per candidate (D1/D4)**: the verifier prompt applied to every proposed candidate; D4 asks for a single answer
+  token (`yes`/`no`, or a label letter) and reads its log-probability as the score.
+- **Decision, batched (D2)**: input = the note with numbered markers around every candidate (`⟦12|03/04/2019⟧`); output
+  `{"decisions": [{"i": 12, "phi": true, "label": "DATE", "extend": [0, 0]}, ...]}`; **D2p** = only accepted
+  candidates as `12:DATE` lines; **D2b** = D2 plus `"additions": [{"text": ..., "label": ...}]` for PHI without a
+  marker (aligned like F1); **D6** = one index per distinct string with `"except": [occurrence indices]`.
+- **Segment gate (D3)**: input = numbered segments (`[1] ...`); short system prompt (label list, one rule); output = the
+  indices of segments that contain PHI, optionally with the labels suspected.
 
 ## Appendix C — H3 arbitration (pseudo-code)
 
@@ -511,3 +684,65 @@ for cand in merge_extents(Y_llm ∪ Y_tc):
         elif tc_forced_prob(cand) >= θ_lo or verify_llm(cand): accept(cand)
         else:                                     drop(cand)
 ```
+
+
+## Appendix D — Per-note token and cost model for the LLM designs
+
+Produced by `python -m note_deid.llm.costmodel` (no API calls). Assumptions are explicit parameters so the table can be
+regenerated with logged counts once a configuration has run; the defaults below are planning estimates for a ~1k-token
+note. Prices are Anthropic list prices read on 2026-11-02: the "strong" role is priced at the Sonnet-5 point (2 / 10 USD
+per 1M input / output tokens — the model behind the `llm-fast` alias in `configs/litellm.models.yaml`; the OpenAI model
+behind `llm-strong` was not re-priced in this session and is supplied with `--input-per-m/--output-per-m`), the "fast"
+role at the Haiku-5.5 point (0.10 / 0.50); cache reads at 0.1 × the input price; batch API 0.5 ×. Like the model
+identifiers themselves these are placeholders to re-verify before any number enters the paper. Hours are wall-clock at
+concurrency 1 with 1 s request overhead and 60 output tokens/s.
+
+| Symbol | Default | Meaning |
+|---|---:|---|
+| N | 1,000 | note tokens |
+| G | 1,500 | system prompt: guideline + format instructions (the cacheable prefix) |
+| P | 20 | gold PHI mentions per note |
+| K | 80 | candidates from the surface-form proposer; K' = 30 from the cheap over-generating proposer (D7) |
+| S, φ | 25, 0.4 | gate segments per note and the fraction flagged (D3) |
+| rep | 1.6 | occurrences per distinct candidate string (D6) |
+| per-candidate tokens | 130 / 6 / 10 / 5 | snippet + framing (D1, D4) / inline marker (D2, D6) / verbose verdict / positives-only verdict |
+| per-span tokens | 15 / 12 | F1 JSON item / inline tag pair (F3, H5) |
+
+**Default workload** (USD per 1,000 notes; "cache" = guideline served from the prompt cache; "x F1" on the cached column):
+
+| ID | Design | calls/note | input (uncached) | input (cache read) | output | USD/1,000 no cache | USD/1,000 cache | xF1 | USD/1,000 cache+batch | h/1,000 @1 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| F1 | extraction, JSON strings (reference) | 1.0 | 1,000 | 1,500 | 300 | 8.00 | 5.30 | 1.00 | 2.65 | 1.7 |
+| F3 | extraction, inline tags | 1.0 | 1,000 | 1,500 | 1,240 | 17.40 | 14.70 | 2.77 | 7.35 | 6.0 |
+| H5 | TC-first editor, full tagged text out | 1.0 | 1,240 | 1,500 | 1,240 | 17.88 | 15.18 | 2.86 | 7.59 | 6.0 |
+| D1 | one decision call per candidate | 80 | 10,400 | 120,000 | 800 | 268.80 | 52.80 | 9.96 | 26.40 | 25.9 |
+| D2 | batched decisions over marked candidates | 1.0 | 1,480 | 1,500 | 800 | 13.96 | 11.26 | 2.12 | 5.63 | 4.0 |
+| D2p | D2, positives-only output | 1.0 | 1,480 | 1,500 | 100 | 6.96 | 4.26 | 0.80 | 2.13 | 0.7 |
+| D2b | D2 + free-text additions for unproposed PHI | 1.0 | 1,480 | 1,500 | 830 | 14.26 | 11.56 | 2.18 | 5.78 | 4.1 |
+| D3 | fast-model segment gate, then D2 on flagged | 2.0 | 1,692 | 1,900 | 350 | 7.55 | 4.81 | 0.91 | 2.41 | 2.2 |
+| D3c | classifier segment gate, then D2 on flagged | 1.0 | 592 | 1,500 | 320 | 7.38 | 4.68 | 0.88 | 2.34 | 1.8 |
+| D4 | per-candidate logprob scoring (API variant) | 80 | 10,400 | 120,000 | 80 | 261.60 | 45.60 | 8.60 | 22.80 | 22.6 |
+| D5 | distilled decision classifier (inference) | 0 | 0 | 0 | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.0 |
+| D6 | D2 with one decision per distinct string | 1.0 | 1,480 | 1,500 | 500 | 10.96 | 8.26 | 1.56 | 4.13 | 2.6 |
+| D7 | fast over-generation, then strong D2 | 2.0 | 2,180 | 3,000 | 750 | 8.83 | 6.00 | 1.13 | 3.00 | 4.0 |
+
+**Long notes** (N = 3,000, P = 60, K = 240, K' = 90, S = 75; same prices): the ranking is unchanged because every term
+scales with N or K — F1 15.30, F3 43.50, H5 44.94, D1 158.40, D2 33.18, D2p 12.18, D2b 34.08, D3 13.83, D3c 13.45,
+D4 136.80, D6 24.18, D7 17.37 USD per 1,000 notes with caching. With the `llm-strong-alt`-class price point (5 / 25 USD)
+every USD figure is 2.5 × higher and the ratios are identical.
+
+**Reading the table.**
+
+- Among the one-call designs the *output* term decides the order: D2's 800 verdict tokens cost more than F1's 300
+  span-item tokens; D2p (positives only) and D6 (one verdict per string) recover most of that; F3 and H5 pay ≈ N output
+  tokens to re-emit the note. The verdict format is therefore an experimental variable in E9, not an implementation detail.
+- The per-candidate designs (D1, D4) are dominated by *requests*, not tokens: 80 calls per note at concurrency 1 is a day
+  per 1k notes, and without prompt caching the guideline is re-read 80 times (≈ 34 × an uncached F1). They are reference
+  conditions
+  and the H3 verifier, not primary detectors.
+- Gating (D3/D3c) and over-generation (D7) bring the strong-model cost to ≈ F1 while keeping D2's grounding properties;
+  their risk is the recall of what the gate or proposer does not pass on, which E9 reports separately.
+- D5 moves the whole family to a local encoder at inference; its cost is one D2 pass over the silver pool (for a 5k-note
+  pool at the default workload ≈ 56 USD with caching).
+- Batch processing halves every figure and suits the offline evaluation runs; caching needs calls that share the prefix
+  within the cache lifetime (5 min by default), which the serialized runner guarantees.
