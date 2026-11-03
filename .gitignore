@@ -222,6 +222,8 @@ data/*
 !data/README.md
 results/*
 !results/README.md
+# small summary tables chosen explicitly (python -m note_deid.summarize), see results/README.md
+!results/summary/
 models/
 third_party/
 .cache/

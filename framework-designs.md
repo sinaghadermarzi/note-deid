@@ -465,6 +465,13 @@ own terms, so `synphi` is released as recipe + manifest with built text only for
 must be synthetic, and released checkpoints are trained only on data whose terms allow it (`docs/datasets.md` §4).
 `CITATION.cff` added for the software citation.
 
+**Decided (2026-11-03, results and loaders)**: committed result tables live only in `results/summary/`, are produced by
+`python -m note_deid.summarize` from a run directory and carry the run id; a table from `SimulatedDetector` runs is
+labelled a pipeline check in `results/summary/README.md` and is never cited as evidence. The `i2b2_2014` loader is
+implemented against the published XML format (category element, `TYPE` subtype, exclusive-end character offsets) and
+tested on a synthetic fixture because the corpus is still inaccessible; the SHIELD loader waits for P2 and a check of the
+repository's file format. The offline quick start (`--demo --repeat 4` build, `smoke_simulated`) runs in CI.
+
 **Open** ▶ (with recommended defaults):
 1. INSTITUTIONAL label group in `synphi` — recommended **yes** (flag).
 2. LLM aliases: `llm-strong` and `llm-fast` model choices — recommended one frontier model and one cheap model from

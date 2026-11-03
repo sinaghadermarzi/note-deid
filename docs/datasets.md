@@ -6,7 +6,7 @@ Last checked: 2026-09-14. See `literature.md` §9 for citations and `framework-d
 
 | Dataset | Kind | Size | Labels | License / access | Status (2026-09-14) | Planned loader |
 |---|---|---|---|---|---|---|
-| i2b2/n2c2 2014 de-id | real, gated | 1,304 notes / 296 patients | 7 cat / 28 leaf labels (XML offsets) | DUA via Harvard DBMI Data Portal, per-user | **Portal "Temporarily Unavailable" since ~2026-07-28; i2b2.org HTTP 500** | `note_deid.data.i2b2_2014` (stub) |
+| i2b2/n2c2 2014 de-id | real, gated | 1,304 notes / 296 patients | 7 cat / 28 leaf labels (XML offsets) | DUA via Harvard DBMI Data Portal, per-user | **Portal "Temporarily Unavailable" since ~2026-07-28; i2b2.org HTTP 500** | `note_deid.data.i2b2_2014` (loader + `convert` CLI implemented against the published XML format; tested on a synthetic fixture only, the corpus has not been loaded) |
 | i2b2 2006 de-id | real, gated | 889 discharge summaries | 8 classes | same DUA | as above | `note_deid.data.i2b2_2006` (stub) |
 | CEGS N-GRID 2016 | real, gated | 1,000 psychiatric intake records | i2b2-style | same DUA | as above | `note_deid.data.ngrid_2016` (stub) |
 | PhysioNet `deid` gold standard v1.1 | real, gated | 2,434 MIMIC-II nursing notes (surrogate PHI) | names, dates, locations, MRN, phone, company | PhysioNet credentialed access (CITI + identity check); ODC-By 1.0 for files | available to credentialed users | `note_deid.data.physionet_deid` (stub) |
