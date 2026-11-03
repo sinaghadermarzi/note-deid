@@ -24,3 +24,12 @@ jobs:
           ruff format --check src tests
       - name: Test
         run: pytest -q
+      - name: Offline quick start (demo synphi build -> simulated run -> summary tables)
+        run: |
+          python -m note_deid.data.synphi build --profile configs/synphi/i2b2like.yaml \
+            --out data/synphi/demo --demo --repeat 4 --seed 0
+          python -m note_deid.run --config configs/experiments/smoke_simulated.yaml --out ci-results
+          run_dir=$(ls -d ci-results/smoke_simulated/*)
+          python -m note_deid.summarize "$run_dir" --out ci-results/summary/smoke_simulated
+          test -s ci-results/summary/smoke_simulated.csv
+          test -s ci-results/summary/smoke_simulated.complementarity.csv

@@ -1,7 +1,8 @@
 """Build the ``synphi`` benchmark: source notes -> cleaned -> PHI-injected -> stratified splits + manifest.
 
     python -m note_deid.data.synphi build --profile configs/synphi/i2b2like.yaml --out data/synphi/v0.1 \
-        [--demo] [--mtsamples path/to/mtsamples.csv] [--asclepius 500] [--limit N] [--seed 0] [--version 0.1]
+        [--demo [--repeat N]] [--mtsamples path/to/mtsamples.csv] [--asclepius 500] [--limit N] [--seed 0] \
+        [--version 0.1]
     python -m note_deid.data.synphi export-opf --bench data/synphi/v0.1 [--splits train dev test]
 
 ``export-opf`` writes ``<split>.opf.jsonl`` next to the unified files for the upstream ``opf train`` / ``opf eval``
@@ -128,7 +129,12 @@ def _load_sources(ns: argparse.Namespace) -> list[Doc]:
     if ns.demo:
         from note_deid.data.samples import demo_docs
 
-        docs.extend(demo_docs())
+        # Each copy gets its own doc_id, hence its own injection (the injector seeds per doc_id), so --repeat gives
+        # an offline smoke run more documents without any download. Not for real builds: the text repeats.
+        for i in range(max(1, ns.repeat)):
+            docs.extend(
+                Doc(f"{d.doc_id}-r{i}" if ns.repeat > 1 else d.doc_id, d.text, [], dict(d.meta)) for d in demo_docs()
+            )
     if ns.mtsamples:
         from note_deid.data.mtsamples import load_mtsamples
 
@@ -153,6 +159,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     b.add_argument("--seed", type=int, default=0)
     b.add_argument("--version", default="0.1")
     b.add_argument("--demo", action="store_true", help="use the built-in PHI-free demo notes")
+    b.add_argument("--repeat", type=int, default=1, help="with --demo: inject each demo note N times (smoke runs)")
     b.add_argument("--mtsamples", help="path to mtsamples.csv")
     b.add_argument("--asclepius", type=int, default=0, help="number of Asclepius notes to stream from the HF hub")
     b.add_argument("--limit", type=int, default=0)
