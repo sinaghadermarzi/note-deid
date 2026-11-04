@@ -1,4 +1,5 @@
 # results/ (gitignored except small summary tables)
 
-`results/<exp>/<run-id>/{predictions.jsonl, metrics.json, cost.json, config.yaml}`; summary CSVs for the paper are
-copied to `results/summary/` and committed explicitly.
+`note_deid.run` writes `results/<exp>/<run-id>/{config.yaml, predictions/<system>.jsonl, metrics.json,
+complementarity.json, cost.json, summary.md}`; summary CSVs for the paper are copied to `results/summary/` and
+committed explicitly.
