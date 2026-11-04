@@ -131,6 +131,22 @@ def test_export_opf_writes_mapped_records_that_round_trip(tmp_path):
     assert n_unsupported > 0  # the i2b2-like profile injects subtypes OPF cannot represent (e.g. AGE, PROFESSION)
 
 
+def test_build_cli_demo_repeat_gives_distinct_injections(tmp_path, capsys):
+    main(["build", "--profile", PROFILE, "--out", str(tmp_path / "b"), "--demo", "--repeat", "3", "--seed", "0"])
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["n_docs"] == 18
+    docs = [d for split in ("train", "dev", "test") for d in read_jsonl(tmp_path / "b" / f"{split}.jsonl")]
+    ids = {d.doc_id for d in docs}
+    assert len(ids) == 18 and {i.rsplit("-r", 1)[1] for i in ids} == {"0", "1", "2"}
+    copies = sorted((d for d in docs if d.doc_id.startswith("demo-001-r")), key=lambda d: d.doc_id)
+    assert len({tuple((s.start, s.end, s.text) for s in d.spans) for d in copies}) == 3  # copies differ
+    # without --repeat the demo ids are unchanged
+    main(["build", "--profile", PROFILE, "--out", str(tmp_path / "one"), "--demo"])
+    capsys.readouterr()
+    plain = [d.doc_id for split in ("train", "dev", "test") for d in read_jsonl(tmp_path / "one" / f"{split}.jsonl")]
+    assert sorted(plain) == sorted(d.doc_id for d in demo_docs())
+
+
 def test_injector_class_reports_targets_and_placed_counts():
     profile = Profile.load(PROFILE)
     doc = Injector(profile, seed=11).inject(demo_docs()[2])
