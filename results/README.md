@@ -1,6 +1,6 @@
 # results/ (gitignored except `summary/`)
 
-`python -m note_deid.run` writes `results/<exp>/<run-id>/{config.yaml, predictions/*.jsonl, metrics.json,
+`python -m note_deid.run` writes `results/<exp>/<run-id>/{config.yaml, predictions/<system>.jsonl, metrics.json,
 complementarity.json, cost.json, summary.md}` so every number can be recomputed from the run directory. Run
 directories are never committed.
 
